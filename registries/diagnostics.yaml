@@ -1,0 +1,13 @@
+# Sampler settings and G3 thresholds (§7.3, §7.4, §14).
+version: v1
+thresholds:
+  rhat_max: 1.01
+  ess_bulk_min: 400
+  ess_tail_min: 400
+  divergences_max: 0
+  ppc_band: [0.05, 0.95]   # convention, disclosed as such
+sampler:
+  chains: 4
+  draws: 1000
+  warmup: 1000
+  target_accept: 0.9

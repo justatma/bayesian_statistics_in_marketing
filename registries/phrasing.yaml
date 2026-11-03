@@ -1,0 +1,34 @@
+# Plain-word labels, caveats and rounding (§10, §12).
+version: v1
+evidence_plain:
+  delivery: "what the ad platform counted as delivered"
+  platform_attributed: "what the ad platform credited to the ads"
+  commercially_realized: "orders actually received"
+  causally_incremental: "measured against a holdout group"
+  deterministic: "arithmetic on the inputs"
+route_plain:
+  conjugate: "exact per-ad model"
+  nuts: "joint funnel model"
+  deterministic: "direct calculation"
+caveat_marginal: "this estimate is still rough"
+not_knowable: "not knowable yet"
+not_knowable_block: >-
+  Not knowable yet: {quantity}. We have {available}; we need about {required}. Getting there costs
+  about {cost}.
+watermark:
+  demo: "DEMO: built from simulated data, not a client result"
+  internal: "INTERNAL: not for client distribution"
+rounding:
+  percent_decimals: 1
+  money_decimals: 0
+  probability_decimals: 2
+causal_lexicon:
+  plain: [caused, drove, generated, lifted]
+  incremental: [incremental]
+notices:
+  too_few_ads: "funnel link not estimated: too few ads"
+  lag_assumed: "conversion lag assumed"
+  lag_approx: "lag-adjusted approximation"
+  platform_modeled: "platform-modeled conversions"
+  joint_failed: "joint model failed checks"
+  waiting_late: "waiting for late conversions"

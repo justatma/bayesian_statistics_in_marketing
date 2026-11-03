@@ -1,0 +1,39 @@
+"""G8: the Bayesian decision tool, registered as a tool at OBSERVE.
+
+The result is a tool result the ledger references (G3.4); the model never reproduces the numbers.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+from pydantic import Field
+
+from atmaos.core.domain.models import Record
+
+
+class BayesianResult(Record):
+    posterior: dict[str, Any]
+    probability_best: dict[str, float]
+    expected_loss: dict[str, float]
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+    config_hash: str
+    tool_version: str
+
+
+class BayesianTool(Protocol):
+    def compare(
+        self,
+        dataset_uri: str,
+        *,
+        metric: str,
+        variants: list[str],
+        priors: dict[str, Any],
+        window: dict[str, Any],
+        segments: dict[str, Any],
+    ) -> BayesianResult: ...
+
+
+def bayesian_tool() -> BayesianTool:
+    """G8's Bayesian entry point."""
+    raise NotImplementedError("G8 is not built; see spec/03_agency.md")

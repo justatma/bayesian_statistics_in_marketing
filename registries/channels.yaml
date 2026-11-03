@@ -1,0 +1,143 @@
+# Channel models (§5.7). One per platform. Read by channels.channel_model; stale ones fail G1.
+#
+# export_map: export column header -> target field. Several headers may map to one field
+# (spellings differ between sources and locales); readers match headers case-insensitively and
+# after trimming. The FIRST header listed for a field is the canonical one the simulator writes.
+# A header containing "{currency}" matches any 3-letter code and yields the row currency.
+#
+# learning_phase_switching_cost: null (unknown, disclosed) or {amount: "250", currency: USD}.
+#
+# Targets: date, entity_ids.account, entity_ids.account_name, entity_ids.campaign,
+# entity_ids.campaign_name, entity_ids.ad_set, entity_ids.ad_set_name, entity_ids.ad,
+# entity_ids.ad_name, impressions, clicks, spend, currency, conversions_reported,
+# revenue_reported, attribution_window (and for orders/ga4 their own row fields).
+#
+# header_status: every literal header below is INFERRED or a placeholder (facts pack F1 found no
+# official list). They are verified against one real export per platform before any client use
+# (D20). Until then freshness_date is the F1 date and the maps carry status "inferred".
+version: v1
+channels:
+  meta:
+    version: "2026-11-03"
+    header_status: inferred
+    export_map:
+      "Day": date
+      "Date": date
+      "Reporting starts": date          # only valid when the export has a daily breakdown
+      "Account ID": entity_ids.account
+      "Account name": entity_ids.account_name
+      "Campaign ID": entity_ids.campaign
+      "Campaign name": entity_ids.campaign_name
+      "Ad set ID": entity_ids.ad_set
+      "Ad set name": entity_ids.ad_set_name
+      "Ad ID": entity_ids.ad
+      "Ad name": entity_ids.ad_name
+      "Impressions": impressions
+      "Link clicks": clicks              # link clicks, not "Clicks (all)" (F1 M-table)
+      "Amount spent ({currency})": spend
+      "Purchases": conversions_reported
+      "Results": conversions_reported    # objective-dependent; reader flags mixed objectives
+      "Purchases conversion value": revenue_reported
+      "Purchase conversion value": revenue_reported
+      "Attribution setting": attribution_window
+    ignored_columns: ["Clicks (all)", "Reach", "Reporting ends", "Result indicator",
+                      "Cost per result", "Purchase ROAS (return on ad spend)"]
+    conversion_field_may_be_modeled: true   # Meta reports modeled conversions (F1 M15 unknown; safe side)
+    default_attribution_window: "7d_click_1d_view"   # F1 M9
+    learning_phase_switching_cost: null
+    freshness_date: 2026-11-03
+    max_age_days: 90
+  google_ads:
+    version: "2026-11-03"
+    header_status: inferred
+    export_map:
+      "Day": date
+      "Customer ID": entity_ids.account
+      "Account": entity_ids.account_name
+      "Campaign ID": entity_ids.campaign
+      "Campaign": entity_ids.campaign_name
+      "Ad group ID": entity_ids.ad_set
+      "Ad group": entity_ids.ad_set_name
+      "Ad ID": entity_ids.ad
+      "Ad": entity_ids.ad_name
+      "Impr.": impressions
+      "Impressions": impressions
+      "Clicks": clicks
+      "Cost": spend
+      "Currency code": currency
+      "Conversions": conversions_reported   # primary actions only; fractional under DDA (F1 G7, VERIFIED)
+      "Conv. value": revenue_reported
+    ignored_columns: ["All conversions", "All conv. value", "View-through conversions"]
+    preamble: {detect_header_by: "Impr.|Impressions|Clicks", drop_rows_starting_with: "Total"}
+    conversion_field_may_be_modeled: true
+    default_attribution_window: "per_conversion_action"   # not in the row (F1 G10)
+    learning_phase_switching_cost: null
+    freshness_date: 2026-11-03
+    max_age_days: 90
+  linkedin:
+    version: "2026-11-03"
+    header_status: inferred
+    export_map:
+      "Start Date (in UTC)": date
+      "Day": date
+      "Account ID": entity_ids.account
+      "Account Name": entity_ids.account_name
+      "Campaign Group ID": entity_ids.campaign
+      "Campaign Group Name": entity_ids.campaign_name
+      "Campaign ID": entity_ids.ad_set
+      "Campaign Name": entity_ids.ad_set_name
+      "Creative ID": entity_ids.ad
+      "Ad ID": entity_ids.ad
+      "Ad Name": entity_ids.ad_name
+      "Impressions": impressions
+      "Clicks": clicks                     # chargeable clicks by objective (F1 L8)
+      "Total Spent": spend
+      "Spent": spend
+      "Currency": currency
+      "Conversions": conversions_reported
+      "Total Conversion Value": revenue_reported
+    ignored_columns: ["Click Conversions", "View Conversions", "Conversion Rate",
+                      "Cost Per Conversion", "Return on Ad Spend", "Leads"]
+    conversion_field_may_be_modeled: true  # LinkedIn may model conversions (F1 L12, VERIFIED)
+    default_attribution_window: "90d_click_90d_view"   # F1 L9, VERIFIED
+    learning_phase_switching_cost: null
+    freshness_date: 2026-11-03
+    max_age_days: 90
+  ga4:
+    version: "2026-11-03"
+    header_status: inferred
+    export_map:
+      "Date": date
+      "Session source": utm.source
+      "Session medium": utm.medium
+      "Session campaign": utm.campaign
+      "Sessions": sessions
+      "Ecommerce purchases": purchases
+      "Purchase revenue": revenue
+    preamble: {comment_prefix: "#"}
+    conversion_field_may_be_modeled: false
+    default_attribution_window: "property_setting"
+    learning_phase_switching_cost: null
+    freshness_date: 2026-11-03
+    max_age_days: 90
+  orders:
+    # Our own orders CSV format (the client's shop export is mapped into this by hand or script).
+    version: "2026-11-03"
+    header_status: defined_here
+    export_map:
+      "order_id": order_id
+      "ordered_at": ordered_at       # ISO-8601 with offset
+      "value": value
+      "currency": currency
+      "refunded": refunded
+      "utm_source": utm.source
+      "utm_medium": utm.medium
+      "utm_campaign": utm.campaign
+      "utm_content": utm.content
+      "click_id": click_id
+      "first_click_at": first_click_at
+    conversion_field_may_be_modeled: false   # orders are always observed (§5.1 C8)
+    default_attribution_window: "none"
+    learning_phase_switching_cost: null
+    freshness_date: 2026-11-03
+    max_age_days: 3650

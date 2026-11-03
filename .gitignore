@@ -2,3 +2,10 @@ bayes_env/
 __pycache__/
 .env
 .DS_Store
+.venv/
+.env.*
+!.env.example
+data/generated/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

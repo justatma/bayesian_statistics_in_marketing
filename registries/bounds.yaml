@@ -1,0 +1,26 @@
+# Floors and decision bounds (spec v0.3 §6.1, §14). Changing a value is a version bump.
+version: v1
+estimability:
+  posterior_width:
+    level: 0.90
+    rel_half_width: 0.20        # D10 estimable
+    caveat_rel_half_width: 0.40 # D10 marginal edge
+  decision_loss:
+    marginal_multiplier: 2.0    # engineering choice; calibrate on shadow runs
+coupling:
+  min_ads_for_coupling: 8       # D11
+  lkj_eta: 2.0                  # weakly regularizing convention
+dynamics:
+  min_days_for_dynamics: 21     # engineering choice
+plausibility:
+  ceiling_q99: {ctr: 0.20, cvr: 0.50}   # engineering choice
+lag:
+  min_lagged_conversions: 50    # engineering choice
+  min_maturity: 0.90            # engineering choice
+value:
+  compound_gamma_k: 2.0         # placeholder, disclosed
+allocation:
+  min_arm_share: 0.10           # engineering choice
+  max_arm_share: 0.90           # per-arm cap; config may lower it
+# Research results (Framework §11). Never read by floors/ (D1), never client-visible (D15).
+research: {}

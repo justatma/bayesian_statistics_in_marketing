@@ -1,0 +1,5 @@
+# Pieces whose code has merged through the gates (spec v0.3 §15). One id per line.
+# The integrator appends a line when a piece merges; nobody else edits this file.
+# Acceptance tests marked `piece("<id>")` run only for ids listed here, or for the ids named in
+# BAYES_PIECES (comma-separated, or `all`), which a builder sets in its worktree.
+S0
