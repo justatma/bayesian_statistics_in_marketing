@@ -1,0 +1,38 @@
+{
+ "request": {
+  "form": {
+   "client_id": "REDACTED",
+   "client_secret": "REDACTED",
+   "grant_type": "refresh_token",
+   "refresh_token": "REDACTED"
+  },
+  "headers": {},
+  "json": null,
+  "method": "POST",
+  "url": "https://www.googleapis.com/oauth2/v3/token"
+ },
+ "response": {
+  "body": {
+   "access_token": "REDACTED",
+   "expires_in": 3599,
+   "scope": "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/analytics.readonly",
+   "token_type": "Bearer"
+  },
+  "headers": {
+   "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+   "cache-control": "no-cache, no-store, max-age=0, must-revalidate",
+   "content-encoding": "gzip",
+   "content-type": "application/json; charset=utf-8",
+   "date": "Tue, 03 Nov 2026 12:57:48 GMT",
+   "expires": "Mon, 01 Jan 1990 00:00:00 GMT",
+   "pragma": "no-cache",
+   "server": "scaffolding on HTTPServer2",
+   "transfer-encoding": "chunked",
+   "vary": "Origin, X-Origin, Referer",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "SAMEORIGIN",
+   "x-xss-protection": "0"
+  },
+  "status": 200
+ }
+}
