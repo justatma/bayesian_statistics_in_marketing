@@ -22,9 +22,17 @@ rounding:
   percent_decimals: 1
   money_decimals: 0
   probability_decimals: 2
-causal_lexicon:
-  plain: [caused, drove, generated, lifted]
-  incremental: [incremental]
+causal_lexicon:  # D29: stems match every inflection (cause/causes/causing/caused)
+  plain: [cause, drive, drove, generate, lift, boost, increase, raise, produce, "led to", "lead to",
+          "leads to", "resulted in", "result in", "results in", "because of", "due to",
+          "thanks to", "responsible for", "contributed to", "contribute to"]
+  incremental: [incremental, incrementality]
+comparative_lexicon:  # D29: every comparative or superlative must match a Comparison and its direction
+  comparative: [better, worse, higher, lower, stronger, weaker, more, fewer, less, cheaper,
+                "more expensive", outperform, underperform, beat, "ahead of", "behind",
+                "superior to", "inferior to", "wins against", "loses to"]
+  superlative: [best, worst, highest, lowest, strongest, weakest, cheapest, winner, "top performer",
+                "bottom performer", leader, "the leader"]
 notices:
   too_few_ads: "funnel link not estimated: too few ads"
   lag_assumed: "conversion lag assumed"
