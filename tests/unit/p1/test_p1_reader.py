@@ -108,7 +108,7 @@ def test_currency_header_conflict_quarantined(tmp_path: Path) -> None:
     path = tmp_path / "gads.csv"
     path.write_text("\n".join(lines) + "\n")
     pull = _read("google_ads", path)
-    assert len(pull.quarantined) == 1 and "unknown currency" in pull.quarantined[0].reasons[0]
+    assert pull.quarantined == [] and len(pull.rows) == 4  # F8: upper-cased before validation
 
 
 def test_ga4_currency_from_manifest_else_xxx(tmp_path: Path) -> None:
@@ -151,3 +151,131 @@ def test_channel_model_switching_cost_and_stale(reg: Path) -> None:
         channel_model("meta", late)
     assert ei.value.result.gate == "G1" and ei.value.result.blocking
     channel_model("meta", late - dt.timedelta(days=1))
+
+
+# --- review fixes ---------------------------------------------------------------------------------
+
+
+def _write(tmp_path: Path, name: str, lines: list[str]) -> Path:
+    path = tmp_path / name
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _gads(tmp_path: Path, edit=None) -> Path:
+    lines = (FIX / "google_ads_canonical.csv").read_text().splitlines()
+    if edit:
+        lines = edit(lines)
+    return _write(tmp_path, "gads.csv", lines)
+
+
+def test_F1_empty_file_and_header_only(tmp_path: Path) -> None:
+    zero = tmp_path / "meta.csv"
+    zero.write_bytes(b"")
+    pull = _read("meta", zero)
+    assert pull.empty_account and pull.rows == [] and pull.measurement_changes
+    head = _gads(tmp_path, lambda ls: ls[:3])
+    pull = _read("google_ads", head)
+    assert pull.empty_account and pull.rows == [] and pull.quarantined == []
+    assert _read("google_ads", FIX / "google_ads_canonical.csv").empty_account is False
+
+
+def test_F2_truncated_utf16_fails_g1(tmp_path: Path) -> None:
+    path = tmp_path / "gads.csv"
+    path.write_bytes((FIX / "google_ads_canonical.csv").read_text().encode("utf-16")[:-1])
+    with pytest.raises(C.GateFailure) as ei:
+        _read("google_ads", path)
+    assert ei.value.result.gate == "G1"
+
+
+def test_F3_minority_currency_quarantined_tie_fails(tmp_path: Path) -> None:
+    pull = _read(
+        "google_ads", _gads(tmp_path, lambda ls: [*ls[:3], ls[3].replace("USD", "EUR"), *ls[4:]])
+    )
+    assert len(pull.rows) == 3 and {r.spend.currency for r in pull.rows} == {"USD"}
+    assert len(pull.quarantined) == 1 and "EUR" in pull.quarantined[0].reasons[0]
+
+    def tie(ls: list[str]) -> list[str]:
+        return [*ls[:3], ls[3].replace("USD", "EUR"), ls[4].replace("USD", "EUR"), *ls[5:]]
+
+    with pytest.raises(C.GateFailure):
+        _read("google_ads", _gads(tmp_path, tie))
+
+
+def test_F4_results_flags(tmp_path: Path) -> None:
+    lines = (FIX / "meta_canonical.csv").read_text().splitlines()
+    both = [lines[0] + ",Results,Result indicator"]
+    both += [ln + f",9,{'purchase' if i % 2 else 'link_click'}" for i, ln in enumerate(lines[1:])]
+    pull = _read("meta", _write(tmp_path, "meta.csv", both))
+    assert sorted(r.conversions_reported for r in pull.rows) == [4.0, 4.0, 6.0, 12.0]
+    notes = " ".join(pull.measurement_changes)
+    assert "not used on 4 rows" in notes and "mixed objectives" in notes
+
+
+def test_F5_non_daily_meta_rows_quarantined(tmp_path: Path) -> None:
+    lines = (FIX / "meta_canonical.csv").read_text().splitlines()
+    out = [lines[0].replace("Day,", "Reporting starts,", 1) + ",Reporting ends"]
+    for i, ln in enumerate(lines[1:]):
+        d = ln.split(",")[0]
+        out.append(ln + ("," + d if i else ",2026-11-30"))
+    pull = _read("meta", _write(tmp_path, "meta.csv", out))
+    assert len(pull.rows) == 3
+    assert "non-daily aggregate" in pull.quarantined[0].reasons[0]
+
+
+def test_F6_total_named_campaign_kept(tmp_path: Path) -> None:
+    def edit(ls: list[str]) -> list[str]:
+        row = ls[3].split(",")
+        row[0] = "Total Eclipse"  # first cell; a data row whose date is bad, not a summary
+        return [*ls[:3], ",".join(row), *ls[4:]]
+
+    pull = _read("google_ads", _gads(tmp_path, edit))
+    assert len(pull.rows) == 3 and len(pull.quarantined) == 1  # quarantined, not silently dropped
+
+
+def test_F7_dashes_optional_none(tmp_path: Path) -> None:
+    pull = _read(
+        "google_ads",
+        _gads(tmp_path, lambda ls: [*ls[:3], ls[3].replace(",280.00", ",--"), *ls[4:]]),
+    )
+    assert pull.quarantined == []
+    assert sum(r.revenue_reported is None for r in pull.rows) == 1
+
+
+def test_F9_duplicates_and_cross_field_checks(tmp_path: Path) -> None:
+    pull = _read(
+        "google_ads", _gads(tmp_path, lambda ls: [*ls[:4], ls[3].replace("3.50", "3.00"), *ls[4:]])
+    )
+    assert len(pull.rows) == 3 and len(pull.quarantined) == 2
+    assert all("duplicate" in q.reasons[0] for q in pull.quarantined)
+    pull = _read("google_ads", _gads(tmp_path, lambda ls: [*ls[:4], ls[3], *ls[4:]]))
+    assert len(pull.rows) == 4 and len(pull.quarantined) == 1
+
+    src = (FIX / "orders_canonical.csv").read_text().splitlines()
+    pull = _read("orders", _write(tmp_path, "o.csv", [src[0], src[1].replace(",0.00,", ",90.00,")]))
+    assert pull.rows == [] and "refunded above value" in pull.quarantined[0].reasons[0]
+
+    g = (FIX / "ga4_canonical.csv").read_text().splitlines()
+    pull = _read("ga4", _write(tmp_path, "g.csv", [g[5], g[6].replace(",120,3,", ",2,3,")]))
+    assert pull.rows == [] and "purchases above sessions" in pull.quarantined[0].reasons[0]
+
+
+def test_F10_as_of_and_timezone() -> None:
+    with pytest.raises(C.GateFailure):
+        read_export(
+            "meta",
+            FIX / "meta_canonical.csv",
+            _manifest(FIX / "meta_canonical.csv", "meta"),
+            as_of=dt.date(2030, 1, 1),
+        )
+    assert _read("orders", FIX / "orders_canonical.csv").timezone == "UTC"
+    assert _read("linkedin", FIX / "linkedin_canonical.csv").timezone == "UTC"
+    assert _read("meta", FIX / "meta_canonical.csv").timezone is None
+
+
+def test_F11_quoted_multiline_cell(tmp_path: Path) -> None:
+    def edit(ls: list[str]) -> list[str]:
+        return [*ls[:3], ls[3].replace(",Ad A,", ',"Ad\nA, two lines",'), *ls[4:]]
+
+    pull = _read("google_ads", _gads(tmp_path, edit))
+    assert pull.quarantined == [] and len(pull.rows) == 4

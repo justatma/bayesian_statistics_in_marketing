@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import logging
 from collections import Counter, defaultdict
+from collections.abc import Callable, Hashable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -32,7 +34,15 @@ from bayesian_marketing.data_contract.readers.rows import (
     performance_fields,
     site_row,
 )
-from bayesian_marketing.data_contract.readers.table import Table, TableError, decode, parse
+from bayesian_marketing.data_contract.readers.table import (
+    Table,
+    TableError,
+    decode,
+    norm,
+    parse,
+)
+
+log = logging.getLogger(__name__)
 
 PERFORMANCE_PLATFORMS = ("meta", "google_ads", "linkedin")
 REQUIRED: dict[str, tuple[str, ...]] = {
@@ -40,6 +50,14 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "orders": ("order_id", "ordered_at", "value", "refunded"),
     "ga4": ("date", "sessions", "purchases", "revenue"),
 }
+# Header rules the registry states only in comments (channels.yaml meta block). They are code
+# here until the registry carries them as fields (manifest open question).
+OBJECTIVE_RULES: dict[str, dict[str, str]] = {
+    "meta": {"dependent": "Results", "preferred": "Purchases", "indicator": "Result indicator"}
+}
+PERIOD_COLUMNS: dict[str, tuple[str, str]] = {"meta": ("Reporting starts", "Reporting ends")}
+
+Pair = tuple[list[str], Any]  # (raw cells, typed row)
 
 
 def _kind(platform: Platform) -> str:
@@ -74,75 +92,162 @@ def _fallback_currency(platform: Platform, manifest: DatasetManifest, path: Path
     return NO_CURRENCY if platform == "ga4" else None
 
 
-def _performance_rows(
-    table: Table, ctx: Context, cm: ChannelModel
+def _quarantine(table: Table, cells: list[str], reasons: list[str]) -> QuarantinedRow:
+    return QuarantinedRow(raw=table.raw(cells), reasons=reasons)
+
+
+def _dedupe(
+    table: Table, pairs: list[Pair], key: Callable[[Any], Hashable], label: Callable[[Any], str]
+) -> tuple[list[Pair], list[QuarantinedRow]]:
+    """C1 duplicates. Identical repeats keep the first; conflicting ones keep none."""
+    groups: dict[Hashable, list[Pair]] = defaultdict(list)
+    for p in pairs:
+        groups[key(p[1])].append(p)
+    kept: list[Pair] = []
+    quarantined: list[QuarantinedRow] = []
+    for cells, row in pairs:
+        group = groups[key(row)]
+        identical = all(r == group[0][1] for _, r in group)
+        if len(group) == 1 or (identical and group[0][0] is cells):
+            kept.append((cells, row))
+            continue
+        why = "identical repeat" if identical else "conflicting values"
+        reason = f"duplicate {label(row)} ({why}, {len(group)} rows)"
+        quarantined.append(_quarantine(table, cells, [reason]))
+    return kept, quarantined
+
+
+def _single_currency(
+    platform: Platform, table: Table, pairs: list[Pair], currency_of: Callable[[Any], str]
+) -> tuple[list[Pair], list[QuarantinedRow]]:
+    """One currency per pull. Minority-currency rows are quarantined; a tie cannot be decided."""
+    counts = Counter(currency_of(r) for _, r in pairs)
+    if len(counts) <= 1:
+        return pairs, []
+    (top, n_top), (_, n_next) = counts.most_common(2)
+    if n_top == n_next:
+        raise TableError(f"rows split evenly across currencies {dict(sorted(counts.items()))}")
+    kept = [(c, r) for c, r in pairs if currency_of(r) == top]
+    quarantined = [
+        _quarantine(table, c, [f"currency {currency_of(r)} differs from the pull's {top}"])
+        for c, r in pairs
+        if currency_of(r) != top
+    ]
+    return kept, quarantined
+
+
+def _objective_checks(platform: Platform, table: Table) -> list[str]:
+    """Meta ``Results`` is objective-dependent (channels.yaml). Flag what cannot pass silently."""
+    rule = OBJECTIVE_RULES.get(platform)
+    if rule is None:
+        return []
+    notes: list[str] = []
+    dep, pref = table.find(rule["dependent"]), table.find(rule["preferred"])
+    ind = table.find(rule["indicator"])
+    if dep is not None and pref is not None:
+        ignored = sum(table.cell(c, dep) is not None for c in table.rows)
+        if ignored:
+            notes.append(
+                f"{platform}: conversions_reported taken from {rule['preferred']!r}; "
+                f"objective-dependent {rule['dependent']!r} present and not used on {ignored} rows"
+            )
+    elif dep is not None:
+        log.warning(
+            "%s: conversions_reported taken from objective-dependent %r column",
+            platform,
+            rule["dependent"],
+        )
+    if dep is not None and ind is not None:
+        objectives = sorted({v for c in table.rows if (v := table.cell(c, ind)) is not None})
+        if len(objectives) > 1:
+            notes.append(
+                f"{platform}: mixed objectives in {rule['dependent']!r}: {', '.join(objectives)}"
+            )
+    return notes
+
+
+def _period_reasons(platform: Platform, table: Table) -> Callable[[list[str]], list[str]]:
+    """Meta rows dated by ``Reporting starts`` must end the same day, else they are aggregates."""
+    cols = PERIOD_COLUMNS.get(platform)
+    date_col = table.columns.get("date")
+    if cols is None or date_col is None or norm(table.header[date_col]) != norm(cols[0]):
+        return lambda cells: []
+    end_col = table.find(cols[1])
+    if end_col is None:
+        log.warning("%s: rows dated by %r with no %r column", platform, cols[0], cols[1])
+        return lambda cells: []
+
+    def check(cells: list[str]) -> list[str]:
+        start, end = table.cell(cells, date_col), table.cell(cells, end_col)
+        if end is not None and end != start:
+            return [f"non-daily aggregate: {cols[0]} {start} to {cols[1]} {end}"]
+        return []
+
+    return check
+
+
+def _performance(
+    platform: Platform, table: Table, ctx: Context, cm: ChannelModel
 ) -> tuple[list[PerformanceRow], list[QuarantinedRow]]:
-    fields: list[dict[str, Any]] = []
+    period = _period_reasons(platform, table)
+    good: list[tuple[list[str], dict[str, Any]]] = []
     quarantined: list[QuarantinedRow] = []
     for cells in table.rows:
         f, reasons = performance_fields(ctx, cells)
-        if f is None:
-            quarantined.append(QuarantinedRow(raw=table.raw(cells), reasons=reasons))
+        reasons = reasons + period(cells)
+        if reasons:
+            quarantined.append(_quarantine(table, cells, reasons))
         else:
-            fields.append(f)
+            assert f is not None
+            good.append((cells, f))
     # C8: copy to observed only when the field is never modeled and every value is an integer.
     copy = (
         not cm.conversion_field_may_be_modeled
-        and bool(fields)
-        and all(f["conversions_integral"] for f in fields)
+        and bool(good)
+        and all(f["conversions_integral"] for _, f in good)
     )
-    rows = []
-    for f in fields:
-        integral = f.pop("conversions_integral")
-        observed = int(f["conversions_reported"]) if copy and integral else None
-        rows.append(PerformanceRow(**f, conversions_observed=observed))
-    return rows, quarantined
+    pairs: list[Pair] = []
+    for cells, f in good:
+        f.pop("conversions_integral")
+        observed = int(f["conversions_reported"]) if copy else None
+        pairs.append((cells, PerformanceRow(**f, conversions_observed=observed)))
+    pairs, dup = _dedupe(
+        table,
+        pairs,
+        key=lambda r: (tuple(sorted(r.entity_ids.items())), r.date),
+        label=lambda r: f"ad {r.entity_ids['ad']!r} on {r.date.isoformat()}",
+    )
+    pairs, mixed = _single_currency(platform, table, pairs, lambda r: r.spend.currency)
+    return [r for _, r in pairs], quarantined + dup + mixed
 
 
-def _order_rows(table: Table, ctx: Context) -> tuple[list[OrderRow], list[QuarantinedRow]]:
-    parsed: list[tuple[list[str], OrderRow]] = []
+def _orders(table: Table, ctx: Context) -> tuple[list[OrderRow], list[QuarantinedRow]]:
+    pairs: list[Pair] = []
     quarantined: list[QuarantinedRow] = []
     for cells in table.rows:
         row, reasons = order_row(ctx, cells)
         if row is None:
-            quarantined.append(QuarantinedRow(raw=table.raw(cells), reasons=reasons))
+            quarantined.append(_quarantine(table, cells, reasons))
         else:
-            parsed.append((cells, row))
-    # C1: a duplicate order_id. Identical repeats keep the first; conflicting ones keep none.
-    by_id: dict[str, list[tuple[list[str], OrderRow]]] = defaultdict(list)
-    for cells, row in parsed:
-        by_id[row.order_id].append((cells, row))
-    rows: list[OrderRow] = []
-    for cells, row in parsed:
-        group = by_id[row.order_id]
-        if len(group) == 1:
-            rows.append(row)
-            continue
-        identical = all(r == group[0][1] for _, r in group)
-        first = group[0][0] is cells
-        if identical and first:
-            rows.append(row)
-            continue
-        why = "identical repeat" if identical else "conflicting values"
-        quarantined.append(
-            QuarantinedRow(
-                raw=table.raw(cells),
-                reasons=[f"duplicate order_id {row.order_id!r} ({why}, {len(group)} rows)"],
-            )
-        )
-    return rows, quarantined
+            pairs.append((cells, row))
+    pairs, dup = _dedupe(
+        table, pairs, key=lambda r: r.order_id, label=lambda r: f"order_id {r.order_id!r}"
+    )
+    pairs, mixed = _single_currency("orders", table, pairs, lambda r: r.value.currency)
+    return [r for _, r in pairs], quarantined + dup + mixed
 
 
-def _site_rows(table: Table, ctx: Context) -> tuple[list[SiteRow], list[QuarantinedRow]]:
-    rows: list[SiteRow] = []
+def _site(table: Table, ctx: Context) -> tuple[list[SiteRow], list[QuarantinedRow]]:
+    pairs: list[Pair] = []
     quarantined: list[QuarantinedRow] = []
     for cells in table.rows:
         row, reasons = site_row(ctx, cells)
         if row is None:
-            quarantined.append(QuarantinedRow(raw=table.raw(cells), reasons=reasons))
+            quarantined.append(_quarantine(table, cells, reasons))
         else:
-            rows.append(row)
-    return rows, quarantined
+            pairs.append((cells, row))
+    pairs, mixed = _single_currency("ga4", table, pairs, lambda r: r.revenue.currency)
+    return [r for _, r in pairs], quarantined + mixed
 
 
 def _measurement_changes(platform: Platform, rows: list[PerformanceRow]) -> list[str]:
@@ -165,58 +270,86 @@ def _measurement_changes(platform: Platform, rows: list[PerformanceRow]) -> list
 
 
 def _window(rows: list[Any]) -> tuple[date, date] | None:
+    """Row dates; for orders, the UTC calendar date of ``ordered_at``."""
     days = [r.ordered_at.date() if isinstance(r, OrderRow) else r.date for r in rows]
     return (min(days), max(days)) if days else None
 
 
-def read_export(platform: Platform, path: Path, manifest: DatasetManifest) -> PlatformPull:
-    """Read one export file into a PlatformPull (§5.1 C1 to C5, C7, C8; G1).
+def _timezone(kind: str, table: Table | None) -> str | None:
+    """Zone the row dates are in, where the file states it: orders are normalized to UTC (C2);
+    a date header naming UTC (LinkedIn "Start Date (in UTC)") is UTC. Otherwise unknown."""
+    if kind == "orders":
+        return "UTC"
+    col = None if table is None else table.columns.get("date")
+    if table is None or col is None:
+        return None
+    words = norm(table.header[col]).replace("(", " ").replace(")", " ").split()
+    return "UTC" if "utc" in words else None
 
-    G1: a stale channel model, a file not listed in the manifest, or a file that cannot be read
-    as a table raises ``GateFailure``. Bad rows are quarantined with reasons.
+
+def read_export(
+    platform: Platform, path: Path, manifest: DatasetManifest, *, as_of: date | None = None
+) -> PlatformPull:
+    """Read one export file into a PlatformPull (§5.1 C1 to C8; G1).
+
+    G1: a stale channel model (judged at ``as_of``, default today UTC), a file not listed in the
+    manifest, or a file that cannot be read as a table raises ``GateFailure``. Bad rows are
+    quarantined with reasons. A 0-byte file, or a header with no data rows, is an empty pull
+    flagged ``empty_account`` (C6).
     """
     path = Path(path)
-    cm = channel_model(platform, utcnow().date())  # stale -> GateFailure G1, this platform only
+    cm = channel_model(platform, as_of or utcnow().date())  # stale -> G1, this platform only
     entry = channel_entry(platform)
     data = path.read_bytes()
     sha = hashlib.sha256(data).hexdigest()
     payload = {"platform": platform, "sha256": sha, "manifest_id": manifest.manifest_id}
+    kind = _kind(platform)
 
     if not any(f.sha256 == sha and f.platform == platform for f in manifest.files):
         raise _g1_fail(
             platform, [f"{path.name} (sha256 {sha[:8]}) is not in the manifest"], payload
         )
+
+    rows: list[Any] = []
+    quarantined: list[QuarantinedRow] = []
+    notes: list[str] = []
+    table: Table | None = None
     try:
-        table = parse(decode(data), entry)
+        text = decode(data)
+        if not text.strip():
+            notes.append(f"{platform}: {path.name} is empty ({len(data)} bytes); no rows read")
+        else:
+            table = parse(text, entry)
+            missing = [t for t in REQUIRED[kind] if t not in table.columns]
+            if missing:
+                raise TableError(f"no column for {', '.join(missing)}")
+            if table.summary_rows:
+                log.info("%s: dropped %d summary rows", platform, len(table.summary_rows))
+            ctx = Context(
+                table=table,
+                fallback_currency=_fallback_currency(platform, manifest, path),
+                attribution_window=manifest.attribution_window.get(platform)
+                or cm.default_attribution_window,
+            )
+            if kind == "performance":
+                rows, quarantined = _performance(platform, table, ctx, cm)
+                notes = _objective_checks(platform, table) + _measurement_changes(platform, rows)
+            elif kind == "orders":
+                rows, quarantined = _orders(table, ctx)
+            else:
+                rows, quarantined = _site(table, ctx)
     except TableError as e:
         raise _g1_fail(platform, [f"{path.name}: {e}"], payload) from e
-    kind = _kind(platform)
-    missing = [t for t in REQUIRED[kind] if t not in table.columns]
-    if missing:
-        raise _g1_fail(platform, [f"{path.name}: no column for {', '.join(missing)}"], payload)
 
-    ctx = Context(
-        table=table,
-        fallback_currency=_fallback_currency(platform, manifest, path),
-        attribution_window=manifest.attribution_window.get(platform)
-        or cm.default_attribution_window,
-    )
-    changes: list[str] = []
-    rows: list[Any]
+    empty = table is None or not table.rows
     if kind == "performance":
-        rows, quarantined = _performance_rows(table, ctx, cm)
-        changes = _measurement_changes(platform, rows)
         # C8: partial truth when some row lacks an observed count and no modeled share is known.
         partial = any(r.conversions_observed is None for r in rows) and all(
             r.conversions_modeled_share is None for r in rows
         )
-        accounts = Counter(r.entity_ids.get("account") for r in rows)
+        accounts = {r.entity_ids.get("account") for r in rows}
         account_id = next(iter(accounts)) if len(accounts) == 1 else None
-    elif kind == "orders":
-        rows, quarantined = _order_rows(table, ctx)
-        partial, account_id = False, None
     else:
-        rows, quarantined = _site_rows(table, ctx)
         partial, account_id = False, None
 
     return PlatformPull(
@@ -228,8 +361,9 @@ def read_export(platform: Platform, path: Path, manifest: DatasetManifest) -> Pl
         rows=rows,
         quarantined=quarantined,
         partial_truth=partial,
-        measurement_changes=changes,
-        timezone=None,
+        measurement_changes=notes,
+        empty_account=empty,
+        timezone=_timezone(kind, table),
         pulled_at=utcnow(),
         synthetic=manifest.synthetic,
     )

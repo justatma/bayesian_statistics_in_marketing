@@ -15,6 +15,7 @@ from bayesian_marketing.data_contract.readers.table import Table
 _INT = re.compile(r"^-?\d+$")
 _NUM = re.compile(r"^-?\d+(\.\d+)?$")
 ENTITY_KEYS = ("account", "campaign", "ad_set", "ad")
+EMPTY_MARKERS = ("", "--")  # "--" is an empty cell in platform UIs (F1 M17, G12: UNKNOWN in files)
 
 
 @dataclass
@@ -39,7 +40,7 @@ class RowReader:
         if col is None or col >= len(self.cells):
             return None
         v = self.cells[col]
-        return v if v != "" else None
+        return None if v in EMPTY_MARKERS else v
 
     def need(self, target: str) -> str | None:
         v = self.get(target)
@@ -101,6 +102,7 @@ class RowReader:
     def currency(self) -> str | None:
         """Row currency column, else the header slot, else the fallback. Must be ISO 4217."""
         row_cur = self.get("currency")
+        row_cur = row_cur.upper() if row_cur is not None else None
         head_cur = self.ctx.table.header_currency
         if row_cur is not None and head_cur is not None and row_cur != head_cur:
             self.reasons.append(f"currency: column {row_cur!r} conflicts with header {head_cur!r}")
@@ -120,7 +122,11 @@ class RowReader:
     def utm(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for target, col in self.ctx.table.columns.items():
-            if target.startswith("utm.") and col < len(self.cells) and self.cells[col] != "":
+            if (
+                target.startswith("utm.")
+                and col < len(self.cells)
+                and self.cells[col] not in EMPTY_MARKERS
+            ):
                 out[target.removeprefix("utm.")] = self.cells[col]
         return out
 
@@ -166,6 +172,8 @@ def order_row(ctx: Context, cells: list[str]) -> tuple[OrderRow | None, list[str
     refunded = r.number("refunded")
     first = r.timestamp("first_click_at", required=False)
     cur = r.currency()
+    if value is not None and refunded is not None and refunded > value:
+        r.reasons.append(f"refunded above value ({refunded} > {value})")
     if r.reasons:
         return None, r.reasons
     assert oid is not None and at is not None and cur is not None
@@ -189,6 +197,8 @@ def site_row(ctx: Context, cells: list[str]) -> tuple[SiteRow | None, list[str]]
     purchases = r.count("purchases")
     revenue = r.number("revenue")
     cur = r.currency()
+    if sessions is not None and purchases is not None and purchases > sessions:
+        r.reasons.append(f"purchases above sessions ({purchases} > {sessions})")
     if r.reasons:
         return None, r.reasons
     assert d is not None and sessions is not None and purchases is not None
