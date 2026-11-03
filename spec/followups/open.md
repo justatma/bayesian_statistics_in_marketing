@@ -17,3 +17,6 @@
 - P8 Meta purchase type is chosen once per pull; rows reporting only another purchase action type get 0 conversions (disclosed in a note). Per-row selection with no double count would be better.
 - P11 must enforce D30: refuse any client run (synthetic=False) without approved economics with a loss tolerance before calling allocate.
 - P9 phrasing keys requested in spec/manifests/P9.md (hard-coded prose constants) to move into phrasing.yaml.
+- D34 low: an ad whose every day has reported conversions above clicks gets no cvr params; NotEstimable says "no conversion data on days with spend" — reword to name the reason.
+- D34 low: Google Ads names are joined by ad id alone; key by (ad_group, ad).
+- D34 open questions in spec/manifests/D34.md: Meta names wait for a re-recording with name fields; objective fields absent from F2/F3/F4; LinkedIn names need adCampaigns/adCreatives shapes (F4 UNKNOWN); F5 should list the ResponseMetaData keys; phrasing key notices.reported_above_clicks.
