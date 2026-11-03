@@ -172,6 +172,9 @@ _POLARITY = {
             "the leader",
             "top ad",
             "top campaign",
+            "on top",
+            "number one",
+            "came out ahead",
         ],
         1,
     ),
@@ -321,7 +324,7 @@ class _Bundle:
     plain_ok: _Exact = field(default_factory=_Exact)
     money_ok: _Exact = field(default_factory=_Exact)
     pct_ok: _Exact = field(default_factory=_Exact)
-    probs: list[float] = field(default_factory=list)
+    probs: list[tuple[str, float]] = field(default_factory=list)  # (option, value)
     window: tuple[date, date] | None = None
     level_pct: Decimal | None = None
 
@@ -356,13 +359,11 @@ def _index(bundle: ReportBundle) -> _Bundle:
             if x is not None and V.finite(x):
                 ix.plain_ok.add(_dec(V.fmt_count(x)))
     for c in bundle.comparisons:
-        ix.probs += [*c.p_best.values(), *c.p_exceeds_break_even.values()]
+        ix.probs += [*c.p_best.items(), *c.p_exceeds_break_even.items()]
         for m in (*c.expected_value.values(), *c.expected_loss.values()):
             ix.money_ok.add(_dec(V.fmt_amount(abs(m.amount))))
         ix.plain_ok.add(_dec(V.fmt_count(float(c.objective.horizon.amount))))
         ads |= set(c.options)
-    for p in ix.probs:
-        ix.plain_ok.add(Decimal(V.fmt_probability(p)))
     for r in bundle.recommendations:
         for m in (r.expected_benefit, r.expected_loss):
             if m is not None:
@@ -372,10 +373,9 @@ def _index(bundle: ReportBundle) -> _Bundle:
             _accept_slot(ix, slot)
         alloc = r.params.get("allocation")
         if isinstance(alloc, dict):
-            for share in alloc.values():
-                if isinstance(share, int | float):  # D31.4: checked like a probability
-                    ix.probs.append(float(share))
-                    ix.plain_ok.add(Decimal(V.fmt_probability(share)))
+            for opt, share in alloc.items():
+                if isinstance(share, int | float):  # D31.4: bound to its option
+                    ix.probs.append((str(opt), float(share)))
     if bundle.quantities:
         start = min(q.scope.window[0] for q in bundle.quantities)
         end = max(q.scope.window[1] for q in bundle.quantities)
@@ -421,9 +421,29 @@ def _about(entities: list[str], metrics: set[str], quantities: list[Quantity]) -
     return [q for q in quantities if V.entities_of(q) & named and q.name in metrics]
 
 
-def _prob_match(v: Decimal, ix: _Bundle) -> bool:
-    for p in ix.probs:
-        if v == _dec(V.fmt_percent(p)) or v / 100 == Decimal(V.fmt_probability(p)):
+def _owner(clause: str, pos: int, ix: _Bundle, entities: list[str]) -> str | None:
+    """The option a number at ``pos`` is attached to: the nearest option named before it in the
+    clause, else the first one after it, else the sentence's only option. None if unattached."""
+    low = clause.lower()
+    opts = [(m.start(), e) for k, e in ix.vocab.items() for m in _word_re(k).finditer(low)]
+    before = [o for o in opts if o[0] < pos]
+    if before:
+        return max(before)[1]
+    after = [o for o in opts if o[0] > pos]
+    if after:
+        return min(after)[1]
+    return entities[0] if len(entities) == 1 else None
+
+
+def _prob_match(v: Decimal, ix: _Bundle, owner: str | None, percent: bool) -> bool:
+    """A comparison probability or allocation share, bound to its option: when the number is
+    attached to an option, only that option's values count."""
+    for opt, p in ix.probs:
+        if owner is not None and opt != owner:
+            continue
+        if percent and (v == _dec(V.fmt_percent(p)) or v / 100 == Decimal(V.fmt_probability(p))):
+            return True
+        if not percent and v == Decimal(V.fmt_probability(p)):
             return True
     return False
 
@@ -502,13 +522,21 @@ def _check_token(
         ]
     if t.kind == "pct":
         after = clause[t.end :]
-        ok = (not metrics and (t.value in ix.pct_ok or _prob_match(t.value, ix))) or (
+        owner = _owner(clause, t.start, ix, entities)
+        ok = (not metrics and (t.value in ix.pct_ok or _prob_match(t.value, ix, owner, True))) or (
             t.value == ix.level_pct and bool(_INTERVAL_AFTER_RE.match(after))
         )
     elif t.kind == "money":
         ok = t.value in ix.money_ok
     elif t.kind == "plain":
-        ok = t.value in ix.plain_ok or t.value in ix.money_ok
+        ok = (
+            t.value in ix.plain_ok
+            or t.value in ix.money_ok
+            or (
+                not metrics
+                and _prob_match(t.value, ix, _owner(clause, t.start, ix, entities), False)
+            )
+        )
     else:
         ok = False
     if ok:
