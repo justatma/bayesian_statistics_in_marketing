@@ -20,3 +20,5 @@
 - D34 low: an ad whose every day has reported conversions above clicks gets no cvr params; NotEstimable says "no conversion data on days with spend" — reword to name the reason.
 - D34 low: Google Ads names are joined by ad id alone; key by (ad_group, ad).
 - D34 open questions in spec/manifests/D34.md: Meta names wait for a re-recording with name fields; objective fields absent from F2/F3/F4; LinkedIn names need adCampaigns/adCreatives shapes (F4 UNKNOWN); F5 should list the ResponseMetaData keys; phrasing key notices.reported_above_clicks.
+- P11 low: observation_evidence trusts a caller-modified result (only config_hash checked); record_approval duplicate check is read-then-append without a lock.
+- Suite runtime ~9-13 min since P5/P11: move the heaviest P5/P11 unit fits behind the slow marker (frozen tests unchanged).
