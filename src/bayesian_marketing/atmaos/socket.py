@@ -7,6 +7,7 @@ ledger compares equal to the one returned.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -49,6 +50,22 @@ EVIDENCE_KEYS = (
 """G3.4 (F7): exactly these keys."""
 
 DECISIONS = ("approved", "rejected")
+RATE_VERBS = (
+    (re.compile(r"\bconver(?:ts|t|ted|ting)\s+at\b", re.IGNORECASE), "has a conversion rate of"),
+    (
+        re.compile(r"\bclick(?:s|ed)?\s+through\s+at\b", re.IGNORECASE),
+        "has a click-through rate of",
+    ),
+)
+"""Rate verbs a narrator may use, read as the metric they state (D38.6)."""
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_CLAUSE_RE = re.compile(r"\s*(?:,\s*and\b|,\s*but\b|;|\band\b|\bbut\b|\bwhile\b)\s*", re.IGNORECASE)
+_IT_RE = re.compile(r"^(?:it|its|this ad|that ad)\s+", re.IGNORECASE)
+_OTHER_SUBJECT_RE = re.compile(
+    r"^(?:we|i|you|they|our|there|the|a|an|this|that|these|those)\b", re.IGNORECASE
+)
+NOT_A_PERSON = frozenset({"system", "engine", "atmaos", "auto", "automatic", "bot"})
+"""decided_by values that name a process, not a person (G6, D38.6). Compared case-folded."""
 REPORT_KINDS = ("client", "demo", "internal")
 
 # §11.3 evidence-class mapping: engine class (and design) -> inventory class.
@@ -108,12 +125,20 @@ def _request(
     window: dict[str, Any],
     segments: dict[str, Any],
 ) -> CompareRequest:
-    if metric not in pipeline.METRICS:
-        raise ValueError(f"metric {metric!r} is not one of {pipeline.METRICS}")
+    """Validated before anything runs (D38.2, D38.6): a D33 objective raises NotInScope naming
+    its value model; an unknown metric or a horizon the metric cannot be valued at raises
+    ValueError. With no horizon given, the registry's default amount is taken in the unit the
+    metric needs (CTR: impressions)."""
+    pipeline.compare_quantity(metric)  # NotInScope (D33) or ValueError
     for k in ("start", "end"):
         if k not in window:
             raise ValueError(f"window needs {k!r} (YYYY-MM-DD)")
-    h = window.get("horizon") or registries.resolve("decision_defaults/horizon_default@v1")
+    h = window.get("horizon")
+    if not h:
+        default = registries.resolve("decision_defaults/horizon_default@v1")
+        h = {"unit": pipeline.horizon_unit(metric), "amount": default["amount"]}
+    horizon = Horizon(unit=h["unit"], amount=Decimal(str(h["amount"])))
+    pipeline.objective_for(metric, horizon)
     bad = {k: v for k, v in priors.items() if not isinstance(v, str)}
     if bad:
         raise ValueError(f"priors map parameter paths to prior ids; got {bad}")
@@ -122,7 +147,7 @@ def _request(
         variants=list(variants),
         priors=dict(priors),
         window=(date.fromisoformat(window["start"]), date.fromisoformat(window["end"])),
-        horizon=Horizon(unit=h["unit"], amount=Decimal(str(h["amount"]))),
+        horizon=horizon,
         segments=dict(segments),
     )
 
@@ -137,9 +162,9 @@ def compare(
     segments: dict[str, Any],
 ) -> dict:
     """BayesianResult-shaped dict (§11.2)."""
+    request = _request(metric, variants, priors, window, segments)
     path = Path(str(dataset_uri).removeprefix("file://"))
     manifest = DatasetManifest.load(dataset_uri)
-    request = _request(metric, variants, priors, window, segments)
     ctx = pipeline.execute(manifest, request, manifest_dir=path.parent)
     return result_of(ctx.snapshot)
 
@@ -312,7 +337,8 @@ def recommendations(run_id: str) -> list[dict]:
 def record_approval(
     recommendation_id: str, approval_ref: str, decision: str, decided_by: str, decided_at: str
 ) -> None:
-    """G6: the approval names a person, the recommendation exists, the decision is approved or
+    """G6: the approval names a person (not a system account), the recommendation exists and has
+    no decision yet (D38.6: one decision per recommendation), the decision is approved or
     rejected. Accepted approvals are appended to the run record."""
     payload = {
         "recommendation_id": recommendation_id,
@@ -324,6 +350,8 @@ def record_approval(
     reasons = []
     if not isinstance(decided_by, str) or not decided_by.strip():
         reasons.append("the approval names no person (decided_by is empty)")
+    elif decided_by.strip().casefold() in NOT_A_PERSON:
+        reasons.append(f"decided_by {decided_by.strip()!r} is not a person")
     if decision not in DECISIONS:
         reasons.append(f"decision {decision!r} is not one of {DECISIONS}")
     if not isinstance(approval_ref, str) or not approval_ref.strip():
@@ -337,6 +365,14 @@ def record_approval(
         reasons.append(f"decided_at {decided_at!r} is not an ISO timestamp")
     if _recommendation(recommendation_id) is None:
         reasons.append(f"recommendation {recommendation_id!r} does not exist")
+    else:
+        prior = run_record.read("ApprovalRecord", recommendation_id=recommendation_id)
+        if prior:
+            first = prior[0]
+            reasons.append(
+                f"recommendation {recommendation_id!r} already has a decision "
+                f"({first.decision} by {first.decided_by}, {first.approval_ref})"  # type: ignore[attr-defined]
+            )
     if reasons:
         raise _g6(reasons, payload)
     run_record.append(
@@ -405,12 +441,67 @@ def _bundle_kind(s: pipeline.RunSnapshot) -> str:
     return "demo" if s.synthetic else "internal"
 
 
+def _aliases(s: pipeline.RunSnapshot) -> list[tuple[re.Pattern[str], str]]:
+    """How a narrator may name an option: "Ad B" or "variant B" for variant B (and the variant
+    key itself when it is not a bare letter), each read as the report's option name, the ad id."""
+    out = []
+    for v, ad in s.variants.items():
+        names = [f"ad {v}", f"variant {v}"]
+        if len(v) > 2 and v.lower() != ad.lower():
+            names.append(v)
+        for n in names:
+            out.append((re.compile(rf"(?<![\w-]){re.escape(n)}(?![\w-])", re.IGNORECASE), ad))
+    return out
+
+
+def explicit_claims(text: str, s: pipeline.RunSnapshot) -> str:
+    """The block with its claims spelled out for G5 (D38.6): variant names read as the report's
+    option names, rate verbs as the metric they state, and a clause that drops its subject
+    ("... and caused sales") given the option named before it, as a sentence of its own."""
+    for pat, ad in _aliases(s):
+        text = pat.sub(ad, text)
+    for pat, repl in RATE_VERBS:
+        text = pat.sub(repl, text)
+    ads = sorted(s.variants.values(), key=len, reverse=True)
+    named = re.compile("|".join(rf"(?<![\w-]){re.escape(a)}(?![\w-])" for a in ads), re.IGNORECASE)
+    out: list[str] = []
+    for sentence in _SENTENCE_RE.split(text.strip()):
+        last: str | None = None
+        for clause in _CLAUSE_RE.split(sentence.strip().rstrip(".!?")):
+            clause = clause.strip()
+            if not clause:
+                continue
+            hits = named.findall(clause)
+            if not hits and last is not None:
+                if _IT_RE.match(clause):
+                    clause = _IT_RE.sub(last + " ", clause, count=1)
+                elif not _OTHER_SUBJECT_RE.match(clause):
+                    clause = f"{last} {clause}"
+            elif hits:
+                last = hits[-1]
+            out.append(clause + ".")
+    return " ".join(out)
+
+
+def _g5(nb: NarrativeBlock, s: pipeline.RunSnapshot, bundle: ReportBundle) -> GateResult:
+    """G5 against the run's own bundle, on the block as written and on its explicit reading;
+    a claim failing either way fails (never looser than the claims checker alone)."""
+    res = _check_narrative(nb, bundle)
+    alt = explicit_claims(nb.text, s)
+    if alt == nb.text:
+        return res
+    more = _check_narrative(nb.model_copy(update={"text": alt}), bundle)
+    extra = [r for r in more.reasons if r not in res.reasons]
+    if not extra:
+        return res
+    return res.model_copy(update={"passed": False, "reasons": [*res.reasons, *extra]})
+
+
 def check_narrative(block: dict, run_id: str) -> dict:
-    """G5 result for one narrative block against the run's bundle."""
+    """G5 result for one narrative block against the run's own bundle (D38.6)."""
     s = pipeline.load_snapshot(run_id)
     nb = _block(block)
-    res = _check_narrative(nb, bundle_of(s, _bundle_kind(s), []))
-    return res.model_dump(mode="json")
+    return _g5(nb, s, bundle_of(s, _bundle_kind(s), [])).model_dump(mode="json")
 
 
 def render_report(run_id: str, kind: str, narrative_blocks: list[dict]) -> str:
@@ -432,7 +523,7 @@ def render_report(run_id: str, kind: str, narrative_blocks: list[dict]) -> str:
     blocks = []
     for b in narrative_blocks:
         nb = _block(b)
-        blocks.append(nb.model_copy(update={"gate": _check_narrative(nb, probe)}))
+        blocks.append(nb.model_copy(update={"gate": _g5(nb, s, probe)}))
     bundle = bundle_of(s, kind, blocks)
     out = pipeline.data_dir() / "reports" / run_id
     return render(bundle, out).html_path

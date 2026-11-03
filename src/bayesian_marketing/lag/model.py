@@ -21,7 +21,11 @@ callers get from ``lag_notices(lag)`` since ``LagModel`` has no notice field.
 
 A window code must name a click window that is a row of the registry table (``1d_click``,
 ``7d_click_1d_view``, ``28d_click``...); any other code raises ValueError rather than borrowing a
-row.
+row, unless the caller passes ``click_window_days`` (D38.3). Google Ads ``per_conversion_action``
+names no click window in the row; the pipeline passes ``longest_default_window()`` (the registry's
+longest click window, 28 days in bounds v1), so the lag comes from the orders file's
+``first_click_at`` when enough orders carry it, else from that window's default curve. Either way
+``lag_notices`` names the source and the window used.
 
 Platform days-to-conversion reports have no verified format in the facts packs (F3 lists Google's
 ``segments.days_to_conversion`` as absent). With enough history the report is kept on record under
@@ -45,6 +49,17 @@ UTC_ZONE = "UTC"
 
 _CLICK_WINDOW = re.compile(r"^(\d+)d_click(?:_|$)")
 
+NO_CLICK_WINDOW_CODES = frozenset({"per_conversion_action"})
+"""Window codes that carry no click window in the row (Google Ads, F1 G10; D38.3)."""
+
+# Wording with no phrasing.yaml key yet (manifest open question). One place, plain words.
+NO_WINDOW_FROM_ORDERS = (
+    "attribution window {code} names no click window; lag estimated from {n} orders' click dates"
+)
+NO_WINDOW_DEFAULT = (
+    "attribution window {code} names no click window; the {days}-day default lag curve is used"
+)
+
 
 def _min_lagged() -> int:
     return int(registries.resolve("bounds/lag/min_lagged_conversions@v1"))
@@ -62,8 +77,13 @@ def _click_window_days(window_code: str) -> int:
     return int(m.group(1))
 
 
-def _window_and_median(window_code: str) -> tuple[int, int]:
-    days = _click_window_days(window_code)
+def longest_default_window() -> int:
+    """The longest click window with a registry default median (D38.3)."""
+    return max(_default_medians())
+
+
+def _window_and_median(window_code: str, days: int | None = None) -> tuple[int, int]:
+    days = _click_window_days(window_code) if days is None else days
     table = _default_medians()
     if days not in table:
         raise ValueError(
@@ -137,16 +157,22 @@ def lag_model(
     *,
     timezone: str | None = None,
     as_of: date | None = None,
+    click_window_days: int | None = None,
 ) -> LagModel:
     """Estimate the lag CDF, or fall back to the registry default with a notice (C1).
 
     ``timezone`` is the account's IANA zone (UTC when None, D27.1). ``as_of``, when given, drops
     right-censored orders: those clicked fewer than click-window days before it.
+    ``click_window_days``, when given, stands in for a code that names no click window (D38.3);
+    it must be a registry row.
     """
     zone = ZoneInfo(timezone or UTC_ZONE)
+    if click_window_days is not None and click_window_days not in _default_medians():
+        raise ValueError(f"no default lag median for a {click_window_days}-day click window")
+    days = click_window_days if click_window_days is not None else _click_window_days(window_code)
     cutoff = None
     if as_of is not None:
-        cutoff = as_of - timedelta(days=_click_window_days(window_code))
+        cutoff = as_of - timedelta(days=days)
     lags = _lags(history, zone, cutoff)
     if len(lags) >= _min_lagged():
         if lag_report:
@@ -163,7 +189,7 @@ def lag_model(
             "too little orders history and platform lag reports have no verified format in the "
             "facts packs; cannot estimate the lag from the report"
         )
-    window, median = _window_and_median(window_code)
+    window, median = _window_and_median(window_code, click_window_days)
     return LagModel(
         platform=platform,
         attribution_window=window_code,
@@ -174,10 +200,18 @@ def lag_model(
 
 
 def lag_notices(lag: LagModel) -> list[str]:
-    """§5.6 C1: a default curve carries "conversion lag assumed" (truncated geometric, D27.2)."""
+    """§5.6 C1: a default curve carries "conversion lag assumed" (truncated geometric, D27.2).
+    A code that names no click window also says where its lag came from (D38.3)."""
+    out: list[str] = []
     if lag.source == "registry_default":
-        return [registries.resolve("phrasing/notices/lag_assumed@v1")]
-    return []
+        out.append(registries.resolve("phrasing/notices/lag_assumed@v1"))
+    if _CLICK_WINDOW.match(lag.attribution_window) is None:
+        code = lag.attribution_window
+        if lag.source == "orders_history":
+            out.append(NO_WINDOW_FROM_ORDERS.format(code=code, n=lag.n_lagged_conversions))
+        elif lag.source == "registry_default":
+            out.append(NO_WINDOW_DEFAULT.format(code=code, days=len(lag.cdf) - 1))
+    return out
 
 
 def mature_fraction(click_date: date, as_of: date, lag: LagModel) -> float:

@@ -32,6 +32,7 @@ from bayesian_marketing.core import (
     registries,
     utcnow,
 )
+from bayesian_marketing.decision.reallocation import EVIDENCE_BY_TARGET
 from bayesian_marketing.reporting.template import REPORT_HTML
 
 # Report wording not yet in phrasing.yaml (manifest open question 1: proposed keys
@@ -224,8 +225,10 @@ def _recommendation(r: Recommendation, bundle: ReportBundle, phr, tmpl) -> dict[
 def _comparisons(bundle: ReportBundle, phr: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for c in bundle.comparisons:
-        about = [q for q in bundle.quantities if V.entities_of(q) & set(c.options)]
-        evidence = _evidence_plain(about or bundle.quantities, phr) or phr["not_knowable"]
+        # D38.7: the label is the one for the comparison's objective, the same one its guarantee
+        # states (contribution and orders: platform-credited; clicks: delivery).
+        cls = EVIDENCE_BY_TARGET.get(c.objective.target)
+        evidence = phr["evidence_plain"][cls] if cls else phr["not_knowable"]
         rows = [
             {
                 "option": o,

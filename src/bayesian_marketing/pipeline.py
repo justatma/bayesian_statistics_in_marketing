@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict
 
 from bayesian_marketing import __version__
+from bayesian_marketing.claims.vocab import METRIC_LABELS
 from bayesian_marketing.core import (
     ClientEconomics,
     CompareRequest,
@@ -51,6 +52,7 @@ from bayesian_marketing.core import (
     Horizon,
     KnowabilitySection,
     LagModel,
+    NotInScope,
     Objective,
     OrderRow,
     PerformanceRow,
@@ -73,9 +75,10 @@ from bayesian_marketing.core import (
 from bayesian_marketing.data_contract.readers.read import read_export
 from bayesian_marketing.decision import run_record
 from bayesian_marketing.decision.allocation import allocate
+from bayesian_marketing.decision.compare import PLANNED_TARGETS, compare
 from bayesian_marketing.decision.compare import SUPPORTED as COMPARE_SUPPORTED
-from bayesian_marketing.decision.compare import compare
 from bayesian_marketing.decision.reallocation import base_slots, make_guarantee
+from bayesian_marketing.decision.stopping import MIN_MATURITY_REF, stop_or_continue
 from bayesian_marketing.derived_metrics.derive import NotEstimable, derive
 from bayesian_marketing.diagnostics.run import run_diagnostics
 from bayesian_marketing.floors.estimability import (
@@ -88,7 +91,13 @@ from bayesian_marketing.floors.estimability import (
 )
 from bayesian_marketing.funnel_state import store
 from bayesian_marketing.inference import conjugate, fallback, router
-from bayesian_marketing.lag.model import lag_model, lag_notices, mature_fraction
+from bayesian_marketing.lag.model import (
+    NO_CLICK_WINDOW_CODES,
+    lag_model,
+    lag_notices,
+    longest_default_window,
+    mature_fraction,
+)
 from bayesian_marketing.prior_registry import registry as prior_registry
 from bayesian_marketing.status_registry.registry import StatusImmutableError, publish
 
@@ -115,6 +124,9 @@ CLIENT_NEEDS_ECONOMICS = (
     "client run refused: approved economics with a loss tolerance are required (G9, D30)"
 )
 G9_REQUIREMENT = "approved economics with a loss tolerance are needed before any decision"
+NOT_ESTIMABLE_REASON = "{quantity} not estimable for {options}: {why}"
+DATA_REQUIREMENT = "{quantity} has to become estimable for every compared ad"
+PLANNED_OBJECTIVE = "objective {metric!r} needs its value model ({model}); not built yet (D33)"
 INHERITED_REASON = "inherits the worst status of its inputs ({inputs}) (D10)"
 NON_FINITE_REASON = (
     "the posterior has no finite spread for this quantity with the data seen (too few events)"
@@ -229,7 +241,10 @@ def tool_version() -> str:
 
 
 def compare_quantity(metric: str) -> str:
-    """The quantity the decision compares for a metric (§11.1)."""
+    """The quantity the decision compares for a metric (§11.1). A D33 objective (leads,
+    subscription contribution) raises NotInScope naming the value model it waits for."""
+    if metric in PLANNED_TARGETS:
+        raise NotInScope(PLANNED_OBJECTIVE.format(metric=metric, model=PLANNED_TARGETS[metric]))
     if metric not in METRICS:
         raise ValueError(f"metric {metric!r} is not one of {METRICS}")
     return metric if metric in RATE_METRICS else "contribution_per_click"
@@ -525,12 +540,23 @@ def fit_lag(
     end: date,
 ) -> tuple[LagModel | None, list[str]]:
     """lag_model with right-censoring at ``as_of`` (P7 follow-up), and its notices. The window
-    code is the one in force on ``end``."""
+    code is the one in force on ``end``. A code that names no click window (Google Ads
+    ``per_conversion_action``) takes the registry's longest click window (D38.3): lag from the
+    orders' ``first_click_at`` when enough orders carry it, else that window's default curve."""
     code = window_code(perf, end)
     history = [o for rows in joined_orders(orders, utm_map, platform).values() for o in rows]
     tz = next((p.timezone for p in perf if p.timezone), None)
+    days = longest_default_window() if code in NO_CLICK_WINDOW_CODES else None
     try:
-        lag = lag_model(platform, code, history or None, None, timezone=tz, as_of=as_of)  # type: ignore[arg-type]
+        lag = lag_model(
+            platform,  # type: ignore[arg-type]
+            code,
+            history or None,
+            None,
+            timezone=tz,
+            as_of=as_of,
+            click_window_days=days,
+        )
     except (ValueError, KeyError) as e:
         return None, [LAG_NOT_MODELED.format(code=code, why=e)]
     return lag, lag_notices(lag)
@@ -612,20 +638,34 @@ def funnel_spec(data: FunnelData) -> FunnelSpec:
     )
 
 
-def fit(
-    data: FunnelData, priors: PriorSet, seed: int
-) -> tuple[Route, FunnelState, list[DiagnosticsReport], list[str], FunnelSpec]:
+@dataclass
+class Fit:
+    route: Route
+    state: FunnelState
+    reports: list[DiagnosticsReport]
+    notices: list[str]
+    spec: FunnelSpec
+    step: str
+    """The step that produced the state: ``conjugate`` (D11 route), ``nuts_full``,
+    ``nuts_static``, ``nuts_unpooled`` or ``fallback_conjugate`` (§7.5)."""
+
+
+def fit(data: FunnelData, priors: PriorSet, seed: int) -> Fit:
     spec = funnel_spec(data)
     r = router.route(spec, data)
     notices = list(r.notices)
     if r.kind == "conjugate":
         state = conjugate.fit_conjugate(data, priors, seed)
         reports = [run_diagnostics(state, data)]  # PPC on the exact route; no sampler ran
+        step = "conjugate"
     else:
         state, reports, degr = fallback.fit_with_fallback(spec, priors, data, seed)
         notices += [f"{n.step}: {n.reason}" for n in degr]
+        step = degr[-1].step if degr else "nuts_full"
+        if step == "conjugate":
+            step = "fallback_conjugate"
     store.save(state)
-    return r, state, reports, notices, spec
+    return Fit(r, state, reports, notices, spec, step)
 
 
 # ------------------------------------------------------------------------------- derive + floors
@@ -741,15 +781,18 @@ def publish_all(quantities: list[Quantity]) -> tuple[dict[str, bool], list[GateR
 def not_knowable(
     run_id: str,
     reason: str,
-    horizon: Horizon,
+    objective: Objective,
     scope: Scope,
     economics_id: str | None,
     currency: str,
+    requirement: str,
 ) -> Recommendation:
-    """A ``not_knowable`` recommendation when no Comparison exists (G9 failed)."""
+    """A ``not_knowable`` recommendation when no Comparison exists. It states its own reason
+    and requirement once (D38.1); the G9 requirement only when G9 is the reason."""
+    horizon = objective.horizon
     probe = Comparison(
         options=[],
-        objective=Objective(target="contribution", horizon=horizon),
+        objective=objective,
         economics_id=economics_id or "none",
         p_best={},
         expected_value={},
@@ -757,7 +800,7 @@ def not_knowable(
         p_exceeds_break_even={},
         method="exact_integration",
     )
-    slots = base_slots(probe, currency) | {"reason": reason, "requirement": G9_REQUIREMENT}
+    slots = base_slots(probe, currency) | {"reason": reason, "requirement": requirement}
     g = make_guarantee("none", slots, f"no recommendation: {reason}", [slots["assumption"]])
     decision = Feasibility(
         status="below_floor",
@@ -786,11 +829,52 @@ def not_knowable(
     )
 
 
-def _objective(name: str, horizon: Horizon) -> Objective:
+def not_estimable_reason(
+    quantity: str, variants: dict[str, str], missing: dict[str, dict[str, str]]
+) -> str:
+    """One clause per distinct reason, naming the ads (the report's option names) it holds for,
+    so a reason shared by every ad is said once (D38.1)."""
+    by_reason: dict[str, list[str]] = {}
+    for v, ad in variants.items():
+        why = missing.get(v, {}).get(quantity)
+        if why is not None:
+            by_reason.setdefault(why, []).append(ad)
+    return "; ".join(
+        NOT_ESTIMABLE_REASON.format(
+            quantity=METRIC_LABELS.get(quantity, quantity), options=", ".join(ads), why=why
+        )
+        for why, ads in by_reason.items()
+    )
+
+
+def horizon_unit(metric: str) -> str:
+    """The horizon unit the metric's comparison needs (§8.1): impressions for CTR, else clicks."""
+    return COMPARE_SUPPORTED[compare_quantity(metric)][1]
+
+
+def objective_for(metric: str, horizon: Horizon) -> Objective:
+    """The comparison objective for a metric and horizon, validated before anything is fitted,
+    saved or published (D38.2). An incompatible pair raises ValueError."""
+    name = compare_quantity(metric)
     target, unit = COMPARE_SUPPORTED[name]
     if horizon.unit != unit:
-        raise ValueError(f"comparing {name} needs a horizon in {unit}, got {horizon.unit} (§8.1)")
+        raise ValueError(
+            f"metric {metric} compares {name}, which needs a horizon in {unit}; "
+            f"got {horizon.unit} (§8.1)"
+        )
     return Objective(target=target, horizon=horizon)  # type: ignore[arg-type]
+
+
+def _immature_cohorts(data: FunnelData, ads: list[str]) -> int:
+    """Cited cohorts (an ad's day with clicks) below the registry's minimum maturity (§5.6 C3)."""
+    floor = float(registries.resolve(MIN_MATURITY_REF))
+    rows = [data.entities.index(a) for a in ads if a in data.entities]
+    return sum(
+        1
+        for i in rows
+        for j in range(len(data.dates))
+        if data.clicks[i][j] > 0 and data.mature_fraction[i][j] < floor
+    )
 
 
 # ------------------------------------------------------------------------------- run
@@ -853,6 +937,7 @@ def execute(
     metric = request.metric
     cq = compare_quantity(metric)
     mq = metric_quantity(metric)
+    objective = objective_for(metric, request.horizon)  # D38.2: before any fit, save, publish
     platform = comparison_platform(manifest, request.variants)
     variants = {v: manifest.entity_map[v][platform] for v in request.variants}
     variants = _segment(variants, request.segments, manifest)
@@ -901,7 +986,14 @@ def execute(
 
     # route and fit (G3 inside the fallback chain)
     seed = _seed(manifest, request)
-    route, state, reports, fit_notices, spec = fit(data, priors, seed)
+    fitted = fit(data, priors, seed)
+    route, state, reports, fit_notices, spec = (
+        fitted.route,
+        fitted.state,
+        fitted.reports,
+        fitted.notices,
+        fitted.spec,
+    )
     for rep in reports:
         if rep.sampler == "numpyro_nuts":
             gates.append(
@@ -915,9 +1007,13 @@ def execute(
         reason=route.reason,
         final_route=state.route,
         fell_back=fell_back,
+        step=fitted.step,
         n_ads=len(data.entities),
         n_days=len(data.dates),
         lag_source=None if lag is None else lag.source,
+        lag_window=None if lag is None else len(lag.cdf) - 1,
+        lag_n=None if lag is None else lag.n_lagged_conversions,
+        lag_notices=lag_notes,
         reports=reports,
         notices=fit_notices,
     )
@@ -947,35 +1043,67 @@ def execute(
         window=(start, end),
         platform=platform,  # type: ignore[arg-type]
     )
+    immature = 0
     if blocked:
         reason = "; ".join(blocked)
         gates.append(_gate("G9", False, blocked, manifest.economics_id))
         recs.append(
             not_knowable(
-                run_id, reason, request.horizon, rec_scope, econ and econ.economics_id, currency
+                run_id,
+                reason,
+                objective,
+                rec_scope,
+                econ and econ.economics_id,
+                currency,
+                G9_REQUIREMENT,
             )
         )
     elif any(o is None for o in options):
-        lacking = [v for v in variants if cq not in by_variant[v]]
-        reason = f"{cq} not estimable for {', '.join(lacking)}: " + "; ".join(
-            missing[v][cq] for v in lacking
-        )
         recs.append(
-            not_knowable(run_id, reason, request.horizon, rec_scope, econ.economics_id, currency)  # type: ignore[union-attr]
+            not_knowable(
+                run_id,
+                not_estimable_reason(cq, variants, missing),
+                objective,
+                rec_scope,
+                econ.economics_id,  # type: ignore[union-attr]
+                currency,
+                DATA_REQUIREMENT.format(quantity=cq),
+            )
         )
     else:
         assert econ is not None
-        comparison = compare(options, _objective(cq, request.horizon), econ)  # type: ignore[arg-type]
+        comparison = compare(options, objective, econ)  # type: ignore[arg-type]
         gates.append(_gate("G9", True, [], econ.economics_id))
         decision = decision_feasibility(comparison, econ)
         with _economics_visible(manifest_dir, econ.economics_id):
             rec = allocate(comparison, run_id)
-        recs.append(rec.model_copy(update={"basis": [o.quantity_id for o in options]}))  # type: ignore[union-attr]
+        basis = [o.quantity_id for o in options]  # type: ignore[union-attr]
+        recs.append(rec.model_copy(update={"basis": basis}))
+        # §5.6 C3, §8.3: a split is never a stop. With immature cohorts the run also says
+        # whether the test may stop (it may not: continue, or not knowable). Lag delays
+        # conversions only, so a CTR comparison is not held back by it.
+        if cq in CONVERSION_BASED:
+            immature = _immature_cohorts(data, comparison.options)
+        if immature and data.currency == econ.currency:
+            stop = stop_or_continue(comparison, decision, data, econ, run_id)
+            recs.append(stop.model_copy(update={"basis": basis}))
 
     for rec in recs:
         run_record.append(rec)
-    _emit(on_stage, "decided", comparison=comparison, decision=decision, recommendations=recs,
-          variants=variants)  # fmt: skip
+    _emit(
+        on_stage,
+        "decided",
+        comparison=comparison,
+        decision=decision,
+        recommendations=recs,
+        variants=variants,
+        quantities=quantities,
+        not_estimable=missing,
+        compare_quantity=cq,
+        metric_quantity=mq,
+        tolerance=None if econ is None else econ.loss_tolerance,
+        immature_cohorts=immature,
+    )
 
     notices = [*fit_notices, *lag_notes]
     changes = [c for p in perf for c in p.measurement_changes]
@@ -992,6 +1120,7 @@ def execute(
         "segments": request.segments,
         "route": route.kind,
         "final_route": state.route,
+        "fit_step": fitted.step,
         "spec": spec.model_dump(mode="json") if route.kind == "nuts" else None,
         "priors": {p: r.prior_id for p, r in priors.records.items()},
         "lag": None if lag is None else {"source": lag.source, "window": lag.attribution_window},

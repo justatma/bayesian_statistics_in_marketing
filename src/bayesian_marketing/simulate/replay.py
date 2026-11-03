@@ -13,13 +13,19 @@ Each recommendation gets ``OutcomeRecord(source="ground_truth")`` rows, one per 
 - ``regret`` (first row only): for an allocation, the true contribution per click of the best
   variant minus the allocation's share-weighted true value, times the horizon, in the economics'
   currency;
-- ``not_knowable_correct`` (first row only, not_knowable verdicts): true when the verdict came
-  from a compared quantity the data could not yet estimate for some variant (no events), i.e.
-  the truth could not be resolved with the data seen; a verdict from missing or unapproved
-  economics is not scored.
+- ``not_knowable_correct`` (first row only, not_knowable verdicts): scored against the truth at
+  the tolerance (§9.4, D38.5). Acting on the data seen means picking the option with the highest
+  posterior mean of the compared quantity; when some option has no estimate the data name no
+  pick, so any option could be picked. The verdict is correct when such a pick's true regret
+  (best true contribution per click minus the pick's, times the horizon) exceeds the loss
+  tolerance: the truth could not be resolved at the tolerance with the data seen. It is wrong
+  when every such pick would have been within tolerance. A verdict with no approved economics
+  carrying a tolerance is not scored (nothing to score against).
 
 ``evidence`` is ``observed`` when the compared quantity rests on the orders file, else
-``platform_attributed``. Scores come from ``audit.guarantee_report`` since the replay began.
+``platform_attributed``. Scores come from ``audit.guarantee_report`` from the date the replay's
+first run started (its own run time, D38.5), not from today's date. G1 freshness is judged at the
+replay's ``end`` (``read_pulls(..., as_of=end)``), the date the replayed data were current.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from bayesian_marketing.core import (
     Quantity,
     Recommendation,
     inputs_hash,
+    load_economics,
     registries,
     utcnow,
 )
@@ -93,8 +100,34 @@ def _compared(s: pipeline.RunSnapshot, ad: str) -> Quantity | None:
     )
 
 
+def not_knowable_correct(
+    qs: dict[str, Quantity | None], truth: dict[str, float], horizon: float, tolerance: float
+) -> bool:
+    """§9.4: True when acting on the data seen could cost more than the tolerance in truth."""
+    if all(q is not None for q in qs.values()):
+        picks = [max(qs, key=lambda v: qs[v].estimate.summary["mean"])]  # type: ignore[union-attr]
+    else:
+        picks = list(qs)  # the data name no pick
+    best = max(truth.values())
+    return max((best - truth[v]) * horizon for v in picks) > tolerance
+
+
+def _tolerance(s: pipeline.RunSnapshot, manifest_dir: Path) -> float | None:
+    if s.economics_id is None:
+        return None
+    try:
+        econ = load_economics(s.economics_id, manifest_dir)
+    except FileNotFoundError:
+        return None
+    if not econ.approved or econ.loss_tolerance is None:
+        return None
+    if econ.loss_tolerance.currency != s.currency:
+        return None
+    return float(econ.loss_tolerance.amount)
+
+
 def _outcomes(
-    rec: Recommendation, s: pipeline.RunSnapshot, gt: GroundTruth
+    rec: Recommendation, s: pipeline.RunSnapshot, gt: GroundTruth, manifest_dir: Path
 ) -> list[dict[str, Any]]:
     tq = gt.true_quantities
     truth = {v: float(tq[f"{v}.{TRUE_QUANTITY}"]) for v in s.variants}
@@ -109,8 +142,9 @@ def _outcomes(
         value = sum(float(share) * truth[ad_to_v[ad]] for ad, share in shares.items())
         head["regret"] = round((max(truth.values()) - value) * h, 6)
     elif rec.action == "not_knowable":
-        if any(q is None for q in qs.values()):
-            head["not_knowable_correct"] = True
+        tol = _tolerance(s, manifest_dir)
+        if tol is not None:
+            head["not_knowable_correct"] = not_knowable_correct(qs, truth, h, tol)
     rows = []
     for i, (v, q) in enumerate(qs.items()):
         row = dict(head) if i == 0 else {"evidence": evidence, "currency": s.currency}
@@ -127,7 +161,7 @@ def replay(scenario_path: Path, seed: int, start: date, end: date) -> AuditRepor
     outcomes for every recommendation, and score them (§9.4)."""
     if end < start:
         raise ValueError("replay end is before its start")
-    since = utcnow().date()
+    started: list[date] = []
     out = pipeline.data_dir() / "replay" / f"{Path(scenario_path).stem}_{seed}"
     gt = generate(Path(scenario_path), seed, out)
     manifest = DatasetManifest.load(out / MANIFEST_NAME)
@@ -153,8 +187,9 @@ def replay(scenario_path: Path, seed: int, start: date, end: date) -> AuditRepor
                 horizon=horizon,
             )
             ctx = pipeline.execute(manifest, request, manifest_dir=out, pulls=seen)
+            started.append(ctx.result.run.started_at.date())
             for rec in ctx.result.recommendations:
-                for realized in _outcomes(rec, ctx.snapshot, gt):
+                for realized in _outcomes(rec, ctx.snapshot, gt, out):
                     run_record.append(
                         OutcomeRecord(
                             recommendation_id=rec.recommendation_id,
@@ -164,4 +199,6 @@ def replay(scenario_path: Path, seed: int, start: date, end: date) -> AuditRepor
                         )
                     )
         day += timedelta(days=1)
-    return guarantee_report(since)
+    if not started:
+        raise ValueError(f"no {platform} data between {start} and {end}; nothing was replayed")
+    return guarantee_report(min(started))
