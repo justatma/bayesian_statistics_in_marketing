@@ -9,8 +9,10 @@ Steps, in order, stopping at the first NUTS fit that passes G3:
 
 A step whose spec equals the previous step's is not refit. Entering any later step emits one
 ``DegradationNotice`` naming the step and the G3 reasons that sent the chain there; the step-4
-notice carries the registry phrase "joint model failed checks". Every G3-failed NUTS state is
-quarantined and saved to the funnel-state store for audit. The step-4 state carries
+notice carries the registry phrase "joint model failed checks". A step whose compile or fit raises
+counts as failed: its notice records the exception type and message, and no state is quarantined
+because none exists. Every G3-failed NUTS state is quarantined and saved to the funnel-state
+store for audit. The step-4 state carries
 ``route.fallback_conjugate = 1`` in its parameters so downstream code can cap it at ``marginal``
 (§7.5; D11's from-the-start conjugate route is not stamped).
 
@@ -26,7 +28,6 @@ from bayesian_marketing.core import (
     FunnelData,
     FunnelSpec,
     FunnelState,
-    GateResult,
     PriorSet,
     inputs_hash,
     make_id,
@@ -38,6 +39,11 @@ from bayesian_marketing.inference import conjugate, sampler_numpyro
 from bayesian_marketing.model_spec import compile as compile_mod
 
 FALLBACK_FLAG = "route.fallback_conjugate"
+
+# Notice wording, held here until the integrator adds phrasing keys (manifest open question 1).
+STEP_FAILED_G3 = "{step} failed G3 ({why})"
+STEP_RAISED = "{step} raised {exc_type}: {message}"
+JOINT_FAILED = "{phrase}: {cause}"  # phrase is phrasing/notices/joint_failed@v1
 
 
 def _fit_config(seed: int) -> FitConfig:
@@ -67,15 +73,11 @@ def _nuts_steps(spec: FunnelSpec) -> list[tuple[str, FunnelSpec]]:
     return out
 
 
-def _notice(
-    step: str, reason: str, previous: str, gate: GateResult, data: FunnelData
-) -> DegradationNotice:
-    why = "; ".join(gate.reasons) or "G3 failed"
-    text = f"{reason}: {previous} failed G3 ({why})" if reason else f"{previous} failed G3 ({why})"
+def _notice(step: str, cause: str, data: FunnelData) -> DegradationNotice:
     return DegradationNotice(
-        notice_id=f"dn_{inputs_hash({'step': step, 'gate': gate.inputs_hash})[:8]}",
+        notice_id=f"dn_{inputs_hash({'step': step, 'cause': cause})[:8]}",
         step=step,
-        reason=text,
+        reason=cause,
         affected=list(data.entities),
     )
 
@@ -109,22 +111,28 @@ def fit_with_fallback(
     config = _fit_config(seed)
     reports: list[DiagnosticsReport] = []
     notices: list[DegradationNotice] = []
-    previous: tuple[str, GateResult] | None = None
+    cause: str | None = None  # why the previous step failed, carried into the next notice
     for step, step_spec in _nuts_steps(spec):
-        if previous is not None:
-            notices.append(_notice(step, "", previous[0], previous[1], data))
-        model = compile_mod.compile_model(step_spec, priors, data)
-        state, raw = sampler_numpyro.NumpyroSampler().fit(model, data, config)
+        if cause is not None:
+            notices.append(_notice(step, cause, data))
+        try:
+            model = compile_mod.compile_model(step_spec, priors, data)
+            state, raw = sampler_numpyro.NumpyroSampler().fit(model, data, config)
+        except Exception as exc:  # integrator ruling: a raising step is a failed step, recorded
+            cause = STEP_RAISED.format(step=step, exc_type=type(exc).__name__, message=exc)
+            continue
         report, gate = g3(raw)
         reports.append(report)
         if gate.passed:
             return state.model_copy(update={"diagnostics_id": report.report_id}), reports, notices
         _quarantine(state)
-        previous = (step, gate)
+        cause = STEP_FAILED_G3.format(step=step, why="; ".join(gate.reasons))
 
-    if previous is None:  # unreachable: there is always at least one NUTS step
+    if cause is None:  # unreachable: there is always at least one NUTS step
         raise RuntimeError("fallback chain ran no NUTS step")
-    notices.append(_notice("conjugate", _joint_failed(), previous[0], previous[1], data))
+    notices.append(
+        _notice("conjugate", JOINT_FAILED.format(phrase=_joint_failed(), cause=cause), data)
+    )
     state, report = _conjugate_step(priors, data, seed)
     reports.append(report)
     return state, reports, notices

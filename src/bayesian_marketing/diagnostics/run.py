@@ -10,16 +10,24 @@ p-value of the stage total over all ads (a mid p-value, P(T_rep > T_obs) + ½ P(
 - value: revenue, the sum of the orders file under the log-normal posterior, else the compound
   gamma total Gamma(k · orders, scale = AOV / k).
 
-A stage with no draws or no data is left out. When the parquet carries a ``chain`` column the
-draws are split by chain and R-hat (rank) and bulk and tail ESS come from ArviZ 1.x, worst over
-columns; without chains (independent conjugate draws) they are None. Divergences come from the
-state parameter ``diagnostics.n_divergences`` when present. ``passed`` is left unset: only ``g3``
-sets it.
+A stage with no draws or no data is left out. Only parameter columns are read: ``rho`` and names
+shaped ``"<entity>.<param>"``; ``chain``, ``draw`` and anything else are ignored.
+
+For a NUTS state the draws must carry a ``chain`` column. R-hat (rank) and bulk and tail ESS come
+from ArviZ 1.x, worst over parameter columns. Zero-variance columns are left out and logged (a
+constant has no R-hat). ESS is computed on a single chain; R-hat needs two or more. Chains of
+unequal length are not truncated: nothing is computed. A metric that cannot be computed is None and
+G3 fails it for NUTS; a NaN or infinite result is kept and G3 fails it as not finite. Divergences
+come from ``posterior.params["diagnostics.n_divergences"]``; a missing or non-finite count is None.
+Conjugate draws are independent, so their R-hat, ESS and divergences are None and G3 skips them.
+``passed`` is left unset: only ``g3`` sets it.
 """
 
 from __future__ import annotations
 
+import logging
 import math
+import re
 from collections.abc import Callable
 
 import numpy as np
@@ -41,7 +49,20 @@ CHAIN_COLUMN = "chain"
 DIVERGENCES_PARAM = "diagnostics.n_divergences"
 TAIL_PROBS = (0.05, 0.95)
 """The definition of tail ESS (Vehtari et al. 2021, ArviZ default), not a tunable threshold."""
+PARAM_COLUMN = re.compile(r"^(rho|[^.]+\.[A-Za-z_][A-Za-z0-9_]*)$")
+"""A parameter draw column: ``rho`` or ``"<entity>.<param>"``."""
 CHUNK = 256  # orders simulated per block when summing an orders file (memory only)
+
+
+log = logging.getLogger(__name__)
+
+NOT_COMPUTED = {
+    "rhat": "rhat not computed: needs two or more equal-length chains of a non-constant parameter",
+    "ess_bulk": "ess_bulk not computed: needs chain-labelled draws of equal length, non-constant",
+    "ess_tail": "ess_tail not computed: needs chain-labelled draws of equal length, non-constant",
+    "divergences": "divergences not computed: the sampler recorded no finite divergence count",
+}
+"""G3 reasons for a NUTS metric that is None. Gate messages, not client phrasing."""
 
 
 def _threshold(key: str) -> object:
@@ -202,23 +223,63 @@ def _ppc(state: FunnelState, data: FunnelData, df: pd.DataFrame, seed: int) -> d
     return out
 
 
+def _param_columns(df: pd.DataFrame) -> list[str]:
+    return [
+        c
+        for c in df.columns
+        if isinstance(c, str)
+        and c != CHAIN_COLUMN
+        and PARAM_COLUMN.match(c)
+        and pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+
+def _worst(values: list[float], pick: Callable[[list[float]], float]) -> float:
+    """Worst value, with any NaN or infinity winning so G3 sees it as not finite."""
+    bad = [v for v in values if not math.isfinite(v)]
+    return bad[0] if bad else pick(values)
+
+
 def _chain_stats(df: pd.DataFrame) -> tuple[float | None, float | None, float | None]:
-    """Worst R-hat, bulk ESS and tail ESS over draw columns, or None without a chain column."""
+    """Worst R-hat, bulk ESS and tail ESS over parameter columns; None where not computable."""
     if CHAIN_COLUMN not in df.columns:
+        log.warning("diagnostics: no %r column; R-hat and ESS not computed", CHAIN_COLUMN)
         return None, None, None
     import arviz as az  # ArviZ 1.x (D19); numpy arrays shaped (chain, draw)
 
-    groups = [g.drop(columns=[CHAIN_COLUMN]) for _, g in df.groupby(CHAIN_COLUMN, sort=True)]
-    n = min(len(g) for g in groups)
-    if len(groups) < 2 or n < 4:
+    groups = [g for _, g in df.groupby(CHAIN_COLUMN, sort=True)]
+    lengths = {len(g) for g in groups}
+    if len(lengths) != 1:
+        log.warning("diagnostics: unequal chain lengths %s; not truncated", sorted(lengths))
         return None, None, None
-    rhat, bulk, tail = -math.inf, math.inf, math.inf
-    for col in groups[0].columns:
-        x = np.stack([g[col].to_numpy(dtype=float)[:n] for g in groups])
-        rhat = max(rhat, float(az.rhat(x)))
-        bulk = min(bulk, float(az.ess(x, method="bulk")))
-        tail = min(tail, float(az.ess(x, method="tail", prob=TAIL_PROBS)))
-    return rhat, bulk, tail
+    cols = _param_columns(df)
+    constant = [c for c in cols if np.ptp(df[c].to_numpy(dtype=float)) == 0]
+    if constant:
+        log.warning("diagnostics: zero-variance columns left out of R-hat and ESS: %s", constant)
+    cols = [c for c in cols if c not in constant]
+    if not cols:
+        return None, None, None
+    rhats: list[float] = []
+    bulks: list[float] = []
+    tails: list[float] = []
+    for col in cols:
+        x = np.stack([g[col].to_numpy(dtype=float) for g in groups])
+        if len(groups) >= 2:
+            rhats.append(float(az.rhat(x)))
+        bulks.append(float(az.ess(x, method="bulk")))
+        tails.append(float(az.ess(x, method="tail", prob=TAIL_PROBS)))
+    rhat = _worst(rhats, max) if rhats else None
+    return rhat, _worst(bulks, min), _worst(tails, min)
+
+
+def _divergences(params: dict[str, float]) -> int | None:
+    div = params.get(DIVERGENCES_PARAM)
+    if div is None:
+        return None
+    if not math.isfinite(div):
+        log.warning("diagnostics: divergence count %r is not finite", div)
+        return None
+    return int(div)
 
 
 def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
@@ -228,12 +289,16 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
         raise ValueError(f"state {state.state_id} has no joint draws to check")
     df = pd.read_parquet(spec.samples_path)
     seed = _seed(state)
-    rhat, bulk, tail = _chain_stats(df)
     params = spec.params or {}
-    div = params.get(DIVERGENCES_PARAM)
-    draw_cols = df.drop(columns=[CHAIN_COLUMN], errors="ignore")
-    ppc = _ppc(state, data, draw_cols, seed)
-    sampler = "conjugate" if state.route == "conjugate" else "numpyro_nuts"
+    if state.route == "conjugate":
+        sampler = "conjugate"
+        rhat = bulk = tail = None
+        div = None
+    else:
+        sampler = "numpyro_nuts"
+        rhat, bulk, tail = _chain_stats(df)
+        div = _divergences(params)
+    ppc = _ppc(state, data, df[_param_columns(df)], seed)
     payload = {"state": state.state_id, "ppc": ppc, "rhat": rhat, "seed": seed}
     return DiagnosticsReport(
         report_id=_report_id(payload),
@@ -241,7 +306,7 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
         rhat_max=rhat,
         ess_bulk_min=bulk,
         ess_tail_min=tail,
-        n_divergences=None if div is None else int(div),
+        n_divergences=div,
         ppc=ppc,
         loo=None,
         seeds=[seed],
@@ -252,8 +317,9 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
 def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
     """The only setter of ``passed``. A fail quarantines the state and triggers fallback.
 
-    One reason per breached threshold, naming the metric or the PPC stage. A metric that is None
-    (not computed, e.g. independent conjugate draws) is not checked. Never raises on a report.
+    One reason per breached threshold, naming the metric or the PPC stage. A None metric fails on
+    a NUTS report (not computed) and is skipped on a conjugate one; NaN or infinity fails as not
+    finite. Never raises on a report.
     """
     reasons: list[str] = []
     rhat_max = float(_threshold("rhat_max"))  # type: ignore[arg-type]
@@ -262,17 +328,32 @@ def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
     div_max = int(_threshold("divergences_max"))  # type: ignore[call-overload]
     lo, hi = (float(x) for x in _threshold("ppc_band"))  # type: ignore[attr-defined]
 
-    def bad(x: float | None, fails: Callable[[float], bool]) -> bool:
-        return x is not None and (not math.isfinite(x) or fails(x))
+    nuts = report.sampler == "numpyro_nuts"
 
-    if bad(report.rhat_max, lambda x: x > rhat_max):
-        reasons.append(f"rhat {report.rhat_max} above rhat_max {rhat_max}")
-    if bad(report.ess_bulk_min, lambda x: x < ess_bulk_min):
-        reasons.append(f"ess_bulk {report.ess_bulk_min} below ess_bulk_min {ess_bulk_min}")
-    if bad(report.ess_tail_min, lambda x: x < ess_tail_min):
-        reasons.append(f"ess_tail {report.ess_tail_min} below ess_tail_min {ess_tail_min}")
-    if report.n_divergences is not None and report.n_divergences > div_max:
-        reasons.append(f"divergences {report.n_divergences} above divergences_max {div_max}")
+    def check(metric: str, x: float | None, fails: Callable[[float], bool], text: str) -> None:
+        if x is None:
+            if nuts:
+                reasons.append(NOT_COMPUTED[metric])
+        elif not math.isfinite(x):
+            reasons.append(f"{metric} {x} is not finite")
+        elif fails(x):
+            reasons.append(f"{metric} {x} {text}")
+
+    check("rhat", report.rhat_max, lambda x: x > rhat_max, f"above rhat_max {rhat_max}")
+    check(
+        "ess_bulk",
+        report.ess_bulk_min,
+        lambda x: x < ess_bulk_min,
+        f"below ess_bulk_min {ess_bulk_min}",
+    )
+    check(
+        "ess_tail",
+        report.ess_tail_min,
+        lambda x: x < ess_tail_min,
+        f"below ess_tail_min {ess_tail_min}",
+    )
+    div = None if report.n_divergences is None else float(report.n_divergences)
+    check("divergences", div, lambda x: x > div_max, f"above divergences_max {div_max}")
     for stage, p in sorted(report.ppc.items()):
         if not math.isfinite(p) or p < lo or p > hi:
             reasons.append(f"PPC misfit in stage {stage}: p-value {p} outside [{lo}, {hi}]")
