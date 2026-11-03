@@ -62,10 +62,15 @@ NOTICE_COMPOUND_GAMMA = (
     "order value from daily totals with a placeholder compound-gamma k"  # [compound_gamma_k]
 )
 NOTICE_UNAPPROVED_PRIORS = "unapproved priors used on synthetic data"  # [unapproved_priors]
-NOTICE_REPORTED_ABOVE_CLICKS = (  # [reported_above_clicks] (D34)
-    "reported conversions exceeded clicks on some days; those days are left out of the "
-    "click-trial conversion rate"
-)
+# [reported_above_clicks] (D34): per quantity, naming what its own calculation did with them.
+_ABOVE = "reported conversions exceeded clicks on some days; "
+NOTICE_REPORTED_ABOVE_CLICKS = {
+    "cvr": _ABOVE + "those days are left out of this conversion rate",
+    "contribution_per_click": _ABOVE
+    + "those days are left out of the conversion rate behind this contribution per click",
+    "cpa": _ABOVE + "those conversions are counted in this cost per acquisition",
+    "roas": _ABOVE + "those days are left out of the conversion rate inside this ROAS",
+}
 
 CONVERSION_BASED = frozenset({"cvr", "cpa", "roas", "contribution_per_click"})
 VALUE_BASED = frozenset({"aov", "roas"})
@@ -236,7 +241,7 @@ def _notices(name: str, v: _View) -> list[str]:
     if (conv or (uses_aov and v.p("flag.aov_source") == 2.0)) and v.flag("platform_modeled"):
         out.append(_notice("platform_modeled"))
     if conv and v.flag("reported_above_clicks"):
-        out.append(NOTICE_REPORTED_ABOVE_CLICKS)
+        out.append(NOTICE_REPORTED_ABOVE_CLICKS[name])
     if "cpm" in v.used and v.flag("cpm_reference_prior"):
         out.append(NOTICE_CPM_REFERENCE)
     if uses_aov and v.p("flag.aov_source") == 1.0:

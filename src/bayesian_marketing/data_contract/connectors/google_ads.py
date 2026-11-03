@@ -49,13 +49,7 @@ AD_FIELDS = (
     "campaign.id",
     "ad_group.id",
     "ad_group_ad.ad.id",
-    # Names (D34). F3 §3: ad_group_ad.ad.name VERIFIED; customer.descriptive_name,
-    # campaign.name and ad_group.name listed as expected but unconfirmed (probe). The campaign's
-    # advertising_channel_type and bidding fields are not in F3: objective stays None.
-    "customer.descriptive_name",
-    "campaign.name",
-    "ad_group.name",
-    "ad_group_ad.ad.name",
+    "ad_group_ad.ad.name",  # D34; F3 §3 VERIFIED
     "segments.date",
     "metrics.impressions",
     "metrics.clicks",
@@ -72,7 +66,16 @@ DOCUMENTED_AD_FIELDS = tuple(
 ENVELOPE = ("results", "nextPageToken", "pageToken", "query")
 HEADERS = ("Authorization", "login-customer-id", "developer-token")
 TOKEN_FORM = ("grant_type", "refresh_token", "client_id", "client_secret")
-FIELDS = CUSTOMER_FIELDS + DOCUMENTED_AD_FIELDS + ENVELOPE + HEADERS + TOKEN_FORM
+# Names whose existence F3 §3 leaves UNKNOWN (D34): asked in a separate, optional query over the
+# same ads and window, so a failure leaves names empty with a pull note and keeps the pull. The
+# campaign's advertising_channel_type and bidding fields are not in F3: objective stays None.
+NAME_FIELDS = ("customer.descriptive_name", "campaign.name", "ad_group.name")
+NAME_TARGETS = {
+    "customer.descriptive_name": "entity_ids.account_name",
+    "campaign.name": "entity_ids.campaign_name",
+    "ad_group.name": "entity_ids.ad_set_name",
+}
+FIELDS = CUSTOMER_FIELDS + NAME_FIELDS + DOCUMENTED_AD_FIELDS + ENVELOPE + HEADERS + TOKEN_FORM
 
 
 def json_name(gaql: str) -> str:
@@ -220,7 +223,9 @@ def _name(v: Any) -> str | None:
     return (v.strip() or None) if isinstance(v, str) else None
 
 
-def _record(r: dict[str, Any], window: tuple[date, date]) -> Record:
+def _record(
+    r: dict[str, Any], window: tuple[date, date], names: dict[str, Any] | None = None
+) -> Record:
     d = text(pick(r, "segments.date"))
     return Record(
         values={
@@ -229,10 +234,8 @@ def _record(r: dict[str, Any], window: tuple[date, date]) -> Record:
             "entity_ids.campaign": text(pick(r, "campaign.id")),
             "entity_ids.ad_set": text(pick(r, "ad_group.id")),
             "entity_ids.ad": text(pick(r, "ad_group_ad.ad.id")),
-            "entity_ids.account_name": _name(pick(r, "customer.descriptive_name")),
-            "entity_ids.campaign_name": _name(pick(r, "campaign.name")),
-            "entity_ids.ad_set_name": _name(pick(r, "ad_group.name")),
             "entity_ids.ad_name": _name(pick(r, "ad_group_ad.ad.name")),
+            **{t: _name(pick(names or {}, f)) for f, t in NAME_TARGETS.items()},
             "impressions": text(pick(r, "metrics.impressions")) or "0",
             "clicks": text(pick(r, "metrics.clicks")) or "0",
             "spend": micros(pick(r, "metrics.cost_micros")) or "0",
@@ -264,15 +267,27 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
         tz = config.timezone
         notes.append(f"{PLATFORM}: customer has no time_zone; dates taken as {tz} (config)")
     # Proto3 JSON leaves zero-valued int64 metrics out of a row; absent metrics read as 0.
-    query = (
-        f"SELECT {', '.join(AD_FIELDS)} FROM ad_group_ad WHERE segments.date BETWEEN "
+    where = (
+        f" FROM ad_group_ad WHERE segments.date BETWEEN "
         f"'{window[0].isoformat()}' AND '{window[1].isoformat()}'"
     )
-    results = _search(t, cid, auth, query)
+    results = _search(t, cid, auth, f"SELECT {', '.join(AD_FIELDS)}{where}")
+    names: dict[str, dict[str, Any]] = {}
+    if results:
+        try:
+            rows = _search(
+                t, cid, auth, f"SELECT ad_group_ad.ad.id, {', '.join(NAME_FIELDS)}{where}"
+            )
+        except ConnectorError as e:
+            notes.append(f"{PLATFORM}: account, campaign and ad group names not read ({e})")
+        else:
+            names = {str(text(pick(r, "ad_group_ad.ad.id"))): r for r in rows}
     return Fetched(
         timezone=str(tz),
         currency=pick(info, "customer.currency_code"),
-        records=[_record(r, window) for r in results],
+        records=[
+            _record(r, window, names.get(str(text(pick(r, "ad_group_ad.ad.id"))))) for r in results
+        ],
         n_elements=len(results),
         notes=notes,
     )

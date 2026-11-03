@@ -122,6 +122,7 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
     url = f"{API}{prop}:runReport"
     rows: list[dict[str, Any]] = []
     meta: dict[str, Any] = {}
+    quality: list[str] = []  # every page's ResponseMetaData, deduplicated (D34)
     offset = 0
     while True:
         body = {
@@ -146,8 +147,9 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
         )
         data = resp.body if isinstance(resp.body, dict) else {}
         _check_headers(data)
-        if not meta and isinstance(data.get("metadata"), dict):
-            meta = data["metadata"]
+        if isinstance(data.get("metadata"), dict):
+            meta = meta or data["metadata"]
+            quality += [n for n in quality_notes(data["metadata"]) if n not in quality]
         page = [r for r in data.get("rows") or [] if isinstance(r, dict)]
         rows += page
         offset += PAGE_LIMIT
@@ -155,7 +157,7 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
         if not page or offset >= total:  # F5 §1: loop until offset >= rowCount
             break
     tz, currency, notes = account_facts(meta, config)
-    notes += quality_notes(meta)
+    notes += quality
     return Fetched(
         timezone=tz,
         currency=currency,

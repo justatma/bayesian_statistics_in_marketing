@@ -38,6 +38,9 @@ class Context:
     table: Table
     fallback_currency: str | None  # manifest / economics currency, when the export carries none
     attribution_window: str  # used when the export has no attribution column
+    # channels.yaml conversions_may_exceed_clicks (D35): reported conversions above clicks are
+    # legitimate for this platform. False quarantines them.
+    conversions_may_exceed_clicks: bool = False
 
 
 class RowReader:
@@ -146,20 +149,13 @@ class RowReader:
         return out
 
 
-def counts_view_through(window: str) -> bool:
-    """Whether an attribution window label counts view-through conversions ("7d_click_1d_view",
-    Meta "7-day click or 1-day view"). Labels follow channels.yaml defaults and the export."""
-    return "view" in window.lower()
-
-
 def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] | None, list[str]]:
     """PerformanceRow fields (without conversions_observed, set by C8 later), or reasons.
 
-    Reported conversions above clicks (D34) are kept when the row's attribution window counts
-    view-through conversions, which clicks cannot bound; ``reported_above_clicks`` marks such a
-    row for the pull note and is popped before the row is built. Under a click-only or unstated
-    window the row stays quarantined: the frozen P1 fuzz requires it for Google Ads, whose
-    window is per conversion action (manifest D34 open question 1).
+    Reported conversions above clicks (D34) are kept when the platform's registry entry says
+    they may exceed clicks (``conversions_may_exceed_clicks``, D35), whatever the attribution
+    window; ``reported_above_clicks`` marks such a row for the pull note and is popped before the
+    row is built. Otherwise the row is quarantined.
     """
     r = RowReader(ctx, cells)
     d = r.date()
@@ -177,11 +173,8 @@ def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] |
     if imp is not None and clk is not None and clk > imp:
         r.reasons.append(f"clicks above impressions ({clk} > {imp})")
     above = conv_d is not None and clk is not None and conv_d > clk
-    if above and not counts_view_through(window):
-        r.reasons.append(
-            f"conversions above clicks ({conv_d} > {clk}) under attribution window {window!r}, "
-            f"which counts no view-through"
-        )
+    if above and not ctx.conversions_may_exceed_clicks:
+        r.reasons.append(f"conversions above clicks ({conv_d} > {clk})")
     if r.reasons:
         return None, r.reasons
     assert cur is not None and spend is not None

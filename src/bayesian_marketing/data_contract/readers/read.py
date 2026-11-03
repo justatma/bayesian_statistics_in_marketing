@@ -187,6 +187,11 @@ def _period_reasons(
     return check
 
 
+def may_exceed_clicks(platform: Platform) -> bool:
+    """channels.yaml ``conversions_may_exceed_clicks`` (D35); absent means no."""
+    return channel_entry(platform).get("conversions_may_exceed_clicks") is True
+
+
 def _objective_column(platform: Platform, table: Table) -> None:
     """Map the first ``objective_columns`` header present (channels.yaml, D34) to the objective
     target. A connector table already carries the target by name."""
@@ -202,8 +207,8 @@ def _objective_column(platform: Platform, table: Table) -> None:
 def _performance(
     platform: Platform, table: Table, ctx: Context, cm: ChannelModel, notes: list[str]
 ) -> tuple[list[PerformanceRow], list[QuarantinedRow]]:
-    """Rows of a performance table. Reported conversions above clicks under a view-through window
-    are kept with a pull note; observed conversions above clicks are quarantined (D34)."""
+    """Rows of a performance table. Reported conversions above clicks are kept with a pull note
+    where the registry allows them (D35); observed conversions above clicks are quarantined."""
     _objective_column(platform, table)
     period = _period_reasons(platform, table, notes)
     good: list[tuple[list[str], dict[str, Any]]] = []
@@ -236,8 +241,9 @@ def _performance(
         pairs.append((cells, PerformanceRow(**f, conversions_observed=observed)))
     if above:
         notes.append(
-            f"{platform}: reported conversions above clicks on {above} rows; kept (view-through, "
-            f"multi-event counting or reporting dates) and left out of the click-trial model"
+            f"{platform}: reported conversions above clicks on {above} "
+            f"{'row' if above == 1 else 'rows'}; kept, and left out of the click-trial "
+            f"conversion rate"
         )
     pairs, dup = _dedupe(
         table,
@@ -359,6 +365,7 @@ def read_export(
                 fallback_currency=_fallback_currency(platform, manifest, path),
                 attribution_window=manifest.attribution_window.get(platform)
                 or cm.default_attribution_window,
+                conversions_may_exceed_clicks=may_exceed_clicks(platform),
             )
             if kind == "performance":
                 rows, quarantined = _performance(platform, table, ctx, cm, notes)

@@ -31,6 +31,7 @@ from bayesian_marketing.data_contract.readers.read import (
     _measurement_changes,
     _performance,
     _site,
+    may_exceed_clicks,
 )
 from bayesian_marketing.data_contract.readers.rows import Context, performance_fields, site_row
 from bayesian_marketing.data_contract.readers.table import Table
@@ -136,6 +137,7 @@ def pull(platform: Platform, config: ClientConfig, window: tuple[date, date]) ->
             table=table,
             fallback_currency=fetched.currency,
             attribution_window=cm.default_attribution_window,
+            conversions_may_exceed_clicks=may_exceed_clicks(platform),
         )
 
     table, ctx, quarantined = _split(targets, fetched, ctx_for, check)
