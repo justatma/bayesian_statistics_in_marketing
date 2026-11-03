@@ -60,7 +60,7 @@ PASSES = [
     "ad_b has a 90% chance of being best.",
     "ad_b has a 0.90 chance of being best.",
     "We did not find that ad_b drove orders.",
-    "Nothing here shows that ad_b caused anything.",
+    "Nothing shows that ad_b caused anything.",
     "The data cover 2026-10-19 to 2026-11-01, run run_00000001, 14 days and 4 ads.",
     "The conversion rate for ad_m is 3.2%, but this estimate is still rough.",
     "The conversion rate for ad_c is not knowable yet.",
@@ -97,7 +97,7 @@ FAILS = [
     ("ad_a has the higher click-through rate.", "ad_a"),
     ("ad_a is ahead of ad_b.", "ad_a"),
     ("ad_a is the winner over ad_b.", "ad_a"),
-    ("The ads are better than expected.", "better"),
+    ("ad_a is better than expected, but ad_c is better.", "ad_c"),
     # D29.4 no fallback
     ("The click-through rate is 4.1%.", "4.1%"),
     ("ad_a is 4.1%.", "4.1%"),
@@ -157,5 +157,5 @@ def test_report_labels_evidence_on_comparisons_and_recommendations(tmp_path: Pat
     caption = html.split('<h2 id="h-comp">')[1].split("</caption>")[0]
     assert plain in caption
     rec = html.split('<article class="rec">')[1].split("</article>")[0]
-    assert "What this counts" in rec and plain in rec
+    assert "Evidence" in rec and plain in rec
     assert "90% range" in html

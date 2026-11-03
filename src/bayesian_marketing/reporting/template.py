@@ -93,7 +93,7 @@ REPORT_HTML = r"""<!doctype html>
       {% if r.benefit %}<dt>Expected benefit</dt><dd>{{ r.benefit }}</dd>{% endif %}
       {% if r.loss %}<dt>Expected loss</dt><dd>{{ r.loss }}</dd>{% endif %}
       <dt>Reversibility</dt><dd>{{ r.reversibility }}</dd>
-      <dt>What this counts</dt><dd>{{ r.evidence }}</dd>
+      <dt>Evidence</dt><dd>{{ r.evidence }}</dd>
       <dt>Approval</dt><dd>{{ approval_text }}</dd>
     </dl>
   </article>
@@ -110,7 +110,7 @@ REPORT_HTML = r"""<!doctype html>
     <thead><tr>
       <th>Option</th><th>Measure</th><th class="num">Estimate</th>
       <th class="num">{{ level }} range</th>
-      <th>Status</th><th>What this counts</th>
+      <th>Status</th><th>Evidence</th>
     </tr></thead>
     <tbody>
     {% for f in findings %}
@@ -135,7 +135,7 @@ REPORT_HTML = r"""<!doctype html>
   <h2 id="h-comp">Comparisons</h2>
   {% for c in comparisons %}
   <table>
-    <caption>Objective: {{ c.objective }} over the next {{ c.horizon }}. What this counts:
+    <caption>Objective: {{ c.objective }} over the next {{ c.horizon }}. Evidence:
       {{ c.evidence }}.</caption>
     <thead><tr><th>Option</th><th class="num">Chance of being best</th>
       <th class="num">Expected value</th><th class="num">Expected loss if chosen</th></tr></thead>
