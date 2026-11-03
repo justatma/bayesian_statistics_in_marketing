@@ -32,6 +32,7 @@ from bayesian_marketing.core import (
     registries,
     utcnow,
 )
+from bayesian_marketing.core.base import NotInScope
 from bayesian_marketing.derived_metrics.dist import (
     QuadratureError,
     draws_of,
@@ -91,9 +92,20 @@ def _money(x: float, cur: str) -> Money:
     return Money(amount=Decimal(repr(float(x))), currency=cur)
 
 
+PLANNED_TARGETS = {  # D33: representable objectives without a value model yet
+    "leads": "lead-to-cash value: qualification, close probability, delay, margin",
+    "subscription_contribution": "retention-adjusted contribution per subscriber",
+}
+
+
 def compare(options: list[Quantity], objective: Objective, econ: ClientEconomics) -> Comparison:
     """Exact quadrature for independent analytic posteriors, else joint draws with MC error."""
     _g9(econ)
+    if objective.target in PLANNED_TARGETS:  # D33
+        raise NotInScope(
+            f"objective {objective.target!r} needs its value model "
+            f"({PLANNED_TARGETS[objective.target]}); not built yet"
+        )
     if len(options) < 2:
         raise ValueError("compare needs at least two options")
     kinds = {q.name for q in options}

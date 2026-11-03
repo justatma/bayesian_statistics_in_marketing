@@ -63,10 +63,10 @@ def test_default_resolution_records_every_hop() -> None:
     assert got.approved and got.elicitation.source == "human"
 
 
-def test_pending_default_comes_back_unapproved() -> None:
+def test_structural_default_is_approved_after_d32() -> None:
     got = priors.resolve("cpm_impressions_per_dollar", "c6", AS_OF)
-    assert not got.approved
-    assert "pending_records" in got.resolution_path[-1]
+    assert got.approved
+    assert "records/cpm_impressions_per_dollar" in got.resolution_path[-1]
 
 
 def test_unknown_path_raises() -> None:

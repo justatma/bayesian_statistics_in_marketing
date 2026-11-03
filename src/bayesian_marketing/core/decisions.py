@@ -24,7 +24,11 @@ class Horizon(Frozen):
 
 
 class Objective(Frozen):
-    target: Literal["contribution", "orders", "clicks"] = "contribution"
+    # D33: leads and subscription contribution are representable; compare refuses them (NotInScope)
+    # until their value models exist (spec/followups/open.md).
+    target: Literal["contribution", "orders", "clicks", "leads", "subscription_contribution"] = (
+        "contribution"
+    )
     horizon: Horizon
 
 

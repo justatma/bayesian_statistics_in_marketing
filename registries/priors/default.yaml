@@ -11,40 +11,73 @@ records:
   conversions_per_dollar:
     family: gamma
     params: {shape: 1, rate: 1}
+  # D22 structural priors, approved by the owner on 2026-11-03 (D32); weakly informative
+  cpm_impressions_per_dollar:
+    family: gamma
+    params: {shape: 1.0, rate: 0.01}       # mean 100 impressions per $ (CPM $10), wide
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  order_value_log_mean:
+    family: normal
+    params: {loc: 4.0, scale: 1.5}         # log $; median ~$55, 95% between ~$3 and ~$1,000
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  order_value_log_sd:
+    family: halfnormal
+    params: {scale: 1.0}
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  logit_scale_ctr:
+    family: halfnormal
+    params: {scale: 1.0}
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  logit_scale_cvr:
+    family: halfnormal
+    params: {scale: 1.0}
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  lkj_concentration:
+    family: fixed
+    params: {value: 2.0}                   # = bounds coupling.lkj_eta
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
+  gamma_obs_shape:
+    family: halfnormal
+    params: {scale: 10.0}                  # phi in §5.2 C6
+    elicitation:  # per-record override (D32): owner approval of the D22 structural placeholders
+      source: human
+      rationale: "weakly informative structural placeholders proposed by the integrator (D22), approved by the owner as framework defaults (D32)"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-03T00:00:00Z"
 elicitation:
   source: human
   rationale: "Manuscript ch. 2 and 4 teaching priors, approved as framework defaults (spec v0.3 §14)"
   author: owner
   approved_by: owner
   approved_at: "2026-10-30T00:00:00Z"
-# D22: structural priors the conjugate CPM/value stages and the joint model need. Weakly
-# informative placeholders, NOT yet owner-approved (I10): each carries its own elicitation with
-# approved_by null, so resolve() blocks them (G8) until the owner approves.
-pending_records:
-  cpm_impressions_per_dollar:
-    family: gamma
-    params: {shape: 1.0, rate: 0.01}       # mean 100 impressions per $ (CPM $10), wide
-  order_value_log_mean:
-    family: normal
-    params: {loc: 4.0, scale: 1.5}         # log $; median ~$55, 95% between ~$3 and ~$1,000
-  order_value_log_sd:
-    family: halfnormal
-    params: {scale: 1.0}
-  logit_scale_ctr:
-    family: halfnormal
-    params: {scale: 1.0}
-  logit_scale_cvr:
-    family: halfnormal
-    params: {scale: 1.0}
-  lkj_concentration:
-    family: fixed
-    params: {value: 2.0}                   # = bounds coupling.lkj_eta
-  gamma_obs_shape:
-    family: halfnormal
-    params: {scale: 10.0}                  # phi in §5.2 C6
-pending_elicitation:
-  source: human
-  rationale: "weakly informative placeholders proposed by the integrator (D22); owner approval pending"
-  author: claude
-  approved_by: null
-  approved_at: null
