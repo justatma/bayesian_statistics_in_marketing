@@ -173,7 +173,7 @@ def test_F1_empty_file_and_header_only(tmp_path: Path) -> None:
     zero = tmp_path / "meta.csv"
     zero.write_bytes(b"")
     pull = _read("meta", zero)
-    assert pull.empty_account and pull.rows == [] and pull.measurement_changes
+    assert pull.empty_account and pull.rows == [] and pull.notes and pull.measurement_changes == []
     head = _gads(tmp_path, lambda ls: ls[:3])
     pull = _read("google_ads", head)
     assert pull.empty_account and pull.rows == [] and pull.quarantined == []
@@ -208,7 +208,7 @@ def test_F4_results_flags(tmp_path: Path) -> None:
     both += [ln + f",9,{'purchase' if i % 2 else 'link_click'}" for i, ln in enumerate(lines[1:])]
     pull = _read("meta", _write(tmp_path, "meta.csv", both))
     assert sorted(r.conversions_reported for r in pull.rows) == [4.0, 4.0, 6.0, 12.0]
-    notes = " ".join(pull.measurement_changes)
+    notes = " ".join(pull.notes)
     assert "not used on 4 rows" in notes and "mixed objectives" in notes
 
 
@@ -307,9 +307,7 @@ def test_R2C_results_single_objective_noted(tmp_path: Path) -> None:
     lines = (FIX / "meta_aliases.csv").read_text().splitlines()
     out = [lines[0] + ",Result indicator", *[ln + ",purchase" for ln in lines[1:]]]
     pull = _read("meta", _write(tmp_path, "meta.csv", out))
-    assert any(
-        "objective-dependent 'Results' (objective purchase)" in n for n in pull.measurement_changes
-    )
+    assert any("objective-dependent 'Results' (objective purchase)" in n for n in pull.notes)
 
 
 def test_R2D_thousands_separators(tmp_path: Path) -> None:
@@ -333,3 +331,39 @@ def test_R2E_dash_reporting_ends_is_blank(tmp_path: Path) -> None:
     ]
     pull = _read("meta", _write(tmp_path, "meta.csv", lines))
     assert len(pull.rows) == 1 and "non-daily" in pull.quarantined[0].reasons[0]
+
+
+# --- review fixes round 3 -------------------------------------------------------------------------
+
+
+def test_R3B_summary_rows_noted() -> None:
+    pull = _read("google_ads", FIX / "google_ads_canonical.csv")
+    assert pull.notes == ["google_ads: dropped 1 summary rows"]
+    assert pull.quarantined == [] and pull.measurement_changes == []
+
+
+def test_R3C_results_only_noted() -> None:
+    pull = _read("meta", FIX / "meta_aliases.csv")
+    assert any("objective-dependent 'Results'" in n for n in pull.notes)
+    assert pull.measurement_changes == []
+    assert _read("meta", FIX / "meta_canonical.csv").notes == []
+
+
+def test_R3_attribution_change_stays_in_measurement_changes(tmp_path: Path) -> None:
+    lines = (FIX / "meta_canonical.csv").read_text().splitlines()
+    lines[3] = lines[3].replace("7d_click_1d_view", "1d_click")
+    pull = _read("meta", _write(tmp_path, "meta.csv", lines))
+    assert len(pull.measurement_changes) == 1 and pull.notes == []
+
+
+def test_R3_leading_zero_group_quarantined(tmp_path: Path) -> None:
+    head = "Day,Ad ID,Impr.,Clicks,Cost,Currency code"
+    lines = [
+        head,
+        '2026-11-01,ad_a,"0,001",0,1.00,USD',
+        '2026-11-01,ad_b,100,5,"0,500.00",USD',
+        "2026-11-01,ad_c,100,5,0.50,USD",
+    ]
+    pull = _read("google_ads", _write(tmp_path, "g.csv", lines))
+    assert [r.entity_ids["ad"] for r in pull.rows] == ["ad_c"]
+    assert len(pull.quarantined) == 2

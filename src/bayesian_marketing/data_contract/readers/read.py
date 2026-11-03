@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import logging
 from collections import Counter, defaultdict
 from collections.abc import Callable, Hashable
 from datetime import date
@@ -41,8 +40,6 @@ from bayesian_marketing.data_contract.readers.table import (
     norm,
     parse,
 )
-
-log = logging.getLogger(__name__)
 
 PERFORMANCE_PLATFORMS = ("meta", "google_ads", "linkedin")
 REQUIRED: dict[str, tuple[str, ...]] = {
@@ -159,22 +156,17 @@ def _objective_checks(platform: Platform, table: Table) -> list[str]:
                 f"{platform}: mixed objectives in {rule['dependent']!r}: {', '.join(objectives)}"
             )
     if dep is not None and pref is None:
-        if len(objectives) == 1:
-            notes.append(
-                f"{platform}: conversions_reported taken from objective-dependent "
-                f"{rule['dependent']!r} (objective {objectives[0]})"
-            )
-        elif not objectives:
-            # Frozen test meta_aliases asserts measurement_changes == [] here (manifest Q5).
-            log.warning(
-                "%s: conversions_reported taken from objective-dependent %r column",
-                platform,
-                rule["dependent"],
-            )
+        objective = f" (objective {objectives[0]})" if len(objectives) == 1 else ""
+        notes.append(
+            f"{platform}: conversions_reported taken from objective-dependent "
+            f"{rule['dependent']!r}{objective}"
+        )
     return notes
 
 
-def _period_reasons(platform: Platform, table: Table) -> Callable[[list[str]], list[str]]:
+def _period_reasons(
+    platform: Platform, table: Table, notes: list[str]
+) -> Callable[[list[str]], list[str]]:
     """Meta rows dated by ``Reporting starts`` must end the same day, else they are aggregates."""
     cols = PERIOD_COLUMNS.get(platform)
     date_col = table.columns.get("date")
@@ -182,7 +174,7 @@ def _period_reasons(platform: Platform, table: Table) -> Callable[[list[str]], l
         return lambda cells: []
     end_col = table.find(cols[1])
     if end_col is None:
-        log.warning("%s: rows dated by %r with no %r column", platform, cols[0], cols[1])
+        notes.append(f"{platform}: rows dated by {cols[0]!r} with no {cols[1]!r} column")
         return lambda cells: []
 
     def check(cells: list[str]) -> list[str]:
@@ -195,9 +187,9 @@ def _period_reasons(platform: Platform, table: Table) -> Callable[[list[str]], l
 
 
 def _performance(
-    platform: Platform, table: Table, ctx: Context, cm: ChannelModel
+    platform: Platform, table: Table, ctx: Context, cm: ChannelModel, notes: list[str]
 ) -> tuple[list[PerformanceRow], list[QuarantinedRow]]:
-    period = _period_reasons(platform, table)
+    period = _period_reasons(platform, table, notes)
     good: list[tuple[list[str], dict[str, Any]]] = []
     quarantined: list[QuarantinedRow] = []
     for cells in table.rows:
@@ -320,7 +312,8 @@ def read_export(
 
     rows: list[Any] = []
     quarantined: list[QuarantinedRow] = []
-    notes: list[str] = []
+    changes: list[str] = []  # C5 only
+    notes: list[str] = []  # other reader disclosures (D24)
     table: Table | None = None
     try:
         text = decode(data)
@@ -332,7 +325,7 @@ def read_export(
             if missing:
                 raise TableError(f"no column for {', '.join(missing)}")
             if table.summary_rows:
-                log.info("%s: dropped %d summary rows", platform, len(table.summary_rows))
+                notes.append(f"{platform}: dropped {len(table.summary_rows)} summary rows")
             ctx = Context(
                 table=table,
                 fallback_currency=_fallback_currency(platform, manifest, path),
@@ -340,8 +333,9 @@ def read_export(
                 or cm.default_attribution_window,
             )
             if kind == "performance":
-                rows, quarantined = _performance(platform, table, ctx, cm)
-                notes = _objective_checks(platform, table) + _measurement_changes(platform, rows)
+                rows, quarantined = _performance(platform, table, ctx, cm, notes)
+                notes += _objective_checks(platform, table)
+                changes = _measurement_changes(platform, rows)
             elif kind == "orders":
                 rows, quarantined = _orders(table, ctx)
             else:
@@ -369,7 +363,8 @@ def read_export(
         rows=rows,
         quarantined=quarantined,
         partial_truth=partial,
-        measurement_changes=notes,
+        measurement_changes=changes,
+        notes=notes,
         empty_account=empty,
         timezone=_timezone(kind, table),
         pulled_at=utcnow(),

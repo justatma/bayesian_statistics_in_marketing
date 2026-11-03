@@ -15,8 +15,9 @@ from bayesian_marketing.data_contract.readers.table import EMPTY_MARKERS, Table
 _INT = re.compile(r"^-?\d+$")
 _NUM = re.compile(r"^-?\d+(\.\d+)?$")
 # Strict comma grouping only: 1,000 / 12,345,678 / 1,500.50. Anything else stays quarantined.
-_GROUPED_INT = re.compile(r"^-?\d{1,3}(,\d{3})+$")
-_GROUPED_NUM = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
+# The first group has no leading zero, so "0,001" is not a grouped number.
+_GROUPED_INT = re.compile(r"^-?[1-9]\d{0,2}(,\d{3})+$")
+_GROUPED_NUM = re.compile(r"^-?[1-9]\d{0,2}(,\d{3})+(\.\d+)?$")
 
 
 def ungroup(v: str, grouped: re.Pattern[str]) -> str:
