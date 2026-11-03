@@ -3,3 +3,4 @@
 # Acceptance tests marked `piece("<id>")` run only for ids listed here, or for the ids named in
 # BAYES_PIECES (comma-separated, or `all`), which a builder sets in its worktree.
 S0
+P2
