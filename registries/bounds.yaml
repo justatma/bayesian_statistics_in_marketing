@@ -17,6 +17,10 @@ plausibility:
 lag:
   min_lagged_conversions: 50    # engineering choice
   min_maturity: 0.90            # engineering choice
+  default_median_days:          # placeholder, disclosed as "conversion lag assumed" (§14, D27)
+    "1": 1                      # median of the untruncated geometric; the curve is then
+    "7": 2                      # truncated at the click window and renormalized, so the
+    "28": 4                     # attributed median can sit a day earlier (1-day window: day 0)
 value:
   compound_gamma_k: 2.0         # placeholder, disclosed
 allocation:

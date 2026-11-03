@@ -102,6 +102,7 @@ def main() -> None:
     t = threading.Thread(target=lambda: [srv.handle_request() for _ in range(5) if not got])
     t.start()
     print("Opening Google consent in your browser. Sign in as atma@atmangroup.org and click Allow.")
+    print(f"If no page opens, paste this into Chrome:\n{url}", flush=True)
     webbrowser.open(url)
     t.join(timeout=600)
     srv.server_close()

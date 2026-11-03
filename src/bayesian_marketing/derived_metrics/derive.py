@@ -217,6 +217,8 @@ def _evidence(name: str, v: _View) -> str:
 
 def _notices(name: str, v: _View) -> list[str]:
     out: list[str] = []
+    if v.params.get("route.fallback_conjugate"):  # §7.5 step 4; floors caps it at marginal (D26)
+        out.append(_notice("joint_failed"))
     if v.params.get("route.too_few_ads"):
         out.append(_notice("too_few_ads"))
     if v.params.get("route.unapproved_priors"):
