@@ -15,3 +15,5 @@
 - P8 merged without its piece id in tests/merged_pieces.txt: its replay tests for meta, google_ads and linkedin (and the no-secrets test, which requires every platform's recording) wait for real recordings from live accounts. Capture with data/recordings/README.md, then add P8 to merged_pieces.txt. ga4 (owner's Tao of Atma property) and meta_empty are recorded.
 - P8 token echo: the Google access token minted by refresh is redacted by key but not added to the scrub list; register it with the transport.
 - P8 Meta purchase type is chosen once per pull; rows reporting only another purchase action type get 0 conversions (disclosed in a note). Per-row selection with no double count would be better.
+- P11 must enforce D30: refuse any client run (synthetic=False) without approved economics with a loss tolerance before calling allocate.
+- P9 phrasing keys requested in spec/manifests/P9.md (hard-coded prose constants) to move into phrasing.yaml.

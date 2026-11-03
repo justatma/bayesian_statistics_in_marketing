@@ -22,17 +22,27 @@ rounding:
   percent_decimals: 1
   money_decimals: 0
   probability_decimals: 2
-causal_lexicon:  # D29: stems match every inflection (cause/causes/causing/caused)
-  plain: [cause, drive, drove, generate, lift, boost, increase, raise, produce, "led to", "lead to",
-          "leads to", "resulted in", "result in", "results in", "because of", "due to",
-          "thanks to", "responsible for", "contributed to", "contribute to"]
+causal_lexicon:  # D29, D31: stems match every inflection; a hit counts only when an option is its subject or object in the clause
+  plain: [cause, drive, drove, generate, lift, boost, increase, raise, produce, improve, impact, trigger,
+          yield, help, create, "brought in", "bring in", "led to", "lead to", "leads to", "resulted in",
+          "result in", "results in", "because of", "due to", "thanks to", "responsible for",
+          "contributed to", "contribute to", "effect on", "driver of", "reason for", "pushed up",
+          "made .* go up"]
   incremental: [incremental, incrementality]
-comparative_lexicon:  # D29: every comparative or superlative must match a Comparison and its direction
+  negation_frames: ["did not find that", "do not find that", "no evidence that", "nothing shows that",
+                    "does not show that", "do not show that", "cannot say that", "cannot say whether",
+                    "we cannot tell whether", "it is not known whether"]  # D31: only these negate a claim
+comparative_lexicon:  # D29, D31: counts only when an option is the subject; direction from the clause's subject
   comparative: [better, worse, higher, lower, stronger, weaker, more, fewer, less, cheaper,
-                "more expensive", outperform, underperform, beat, "ahead of", "behind",
-                "superior to", "inferior to", "wins against", "loses to"]
-  superlative: [best, worst, highest, lowest, strongest, weakest, cheapest, winner, "top performer",
-                "bottom performer", leader, "the leader"]
+                "more expensive", outperform, underperform, beat, "ahead of", ahead, behind, trail,
+                "superior to", superior, "inferior to", inferior, "wins against", win, won, lead,
+                leading, "loses to", lose, lost]
+  superlative: [best, worst, highest, lowest, strongest, weakest, cheapest, winner, loser,
+                "top performer", "bottom performer", "top ad", "top campaign", leader, "the leader",
+                first, last]
+  generic_phrases: ["more data", "more time", "more clicks", "more conversions", "more evidence",
+                    "at best", "at worst", "the better", "lower bound", "upper bound", "more reliable",
+                    "less certain", "more certain", "first day", "last day", "first week", "last week"]  # D31: never comparatives
 notices:
   too_few_ads: "funnel link not estimated: too few ads"
   lag_assumed: "conversion lag assumed"
