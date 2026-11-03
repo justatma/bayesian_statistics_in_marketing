@@ -49,6 +49,13 @@ AD_FIELDS = (
     "campaign.id",
     "ad_group.id",
     "ad_group_ad.ad.id",
+    # Names (D34). F3 §3: ad_group_ad.ad.name VERIFIED; customer.descriptive_name,
+    # campaign.name and ad_group.name listed as expected but unconfirmed (probe). The campaign's
+    # advertising_channel_type and bidding fields are not in F3: objective stays None.
+    "customer.descriptive_name",
+    "campaign.name",
+    "ad_group.name",
+    "ad_group_ad.ad.name",
     "segments.date",
     "metrics.impressions",
     "metrics.clicks",
@@ -209,6 +216,10 @@ def _post(t: Transport, url: str, auth: Auth, body: dict[str, Any]) -> Response:
         auth.headers["Authorization"] = f"Bearer {access_token(t, PLATFORM)}"
 
 
+def _name(v: Any) -> str | None:
+    return (v.strip() or None) if isinstance(v, str) else None
+
+
 def _record(r: dict[str, Any], window: tuple[date, date]) -> Record:
     d = text(pick(r, "segments.date"))
     return Record(
@@ -218,6 +229,10 @@ def _record(r: dict[str, Any], window: tuple[date, date]) -> Record:
             "entity_ids.campaign": text(pick(r, "campaign.id")),
             "entity_ids.ad_set": text(pick(r, "ad_group.id")),
             "entity_ids.ad": text(pick(r, "ad_group_ad.ad.id")),
+            "entity_ids.account_name": _name(pick(r, "customer.descriptive_name")),
+            "entity_ids.campaign_name": _name(pick(r, "campaign.name")),
+            "entity_ids.ad_set_name": _name(pick(r, "ad_group.name")),
+            "entity_ids.ad_name": _name(pick(r, "ad_group_ad.ad.name")),
             "impressions": text(pick(r, "metrics.impressions")) or "0",
             "clicks": text(pick(r, "metrics.clicks")) or "0",
             "spend": micros(pick(r, "metrics.cost_micros")) or "0",

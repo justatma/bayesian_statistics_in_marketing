@@ -157,7 +157,6 @@ def test_currency_mismatch_refused(tmp_path: Path) -> None:
     [
         ({"impressions": 10, "clicks": 50, "spend": 10.0}, "clicks 50 exceed impressions"),
         ({"impressions": 1000, "clicks": 5, "spend": 10.0, "conv_obs": 9}, "exceed clicks"),
-        ({"impressions": 1000, "clicks": 5, "spend": 10.0, "conv_rep": 5.5}, "exceed clicks"),
         ({"impressions": 1000, "clicks": 5, "spend": 10.0, "order_values": [80.0, 0.0]},
          "order value #1"),
         ({"impressions": 1000, "clicks": 5, "spend": -1.0}, "negative"),

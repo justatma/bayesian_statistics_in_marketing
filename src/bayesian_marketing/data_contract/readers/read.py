@@ -28,6 +28,7 @@ from bayesian_marketing.core import (
 )
 from bayesian_marketing.data_contract.readers.currencies import NO_CURRENCY
 from bayesian_marketing.data_contract.readers.rows import (
+    OBJECTIVE,
     Context,
     order_row,
     performance_fields,
@@ -186,9 +187,24 @@ def _period_reasons(
     return check
 
 
+def _objective_column(platform: Platform, table: Table) -> None:
+    """Map the first ``objective_columns`` header present (channels.yaml, D34) to the objective
+    target. A connector table already carries the target by name."""
+    if OBJECTIVE in table.columns:
+        return
+    for header in channel_entry(platform).get("objective_columns") or []:
+        col = table.find(header)
+        if col is not None:
+            table.columns[OBJECTIVE] = col
+            return
+
+
 def _performance(
     platform: Platform, table: Table, ctx: Context, cm: ChannelModel, notes: list[str]
 ) -> tuple[list[PerformanceRow], list[QuarantinedRow]]:
+    """Rows of a performance table. Reported conversions above clicks under a view-through window
+    are kept with a pull note; observed conversions above clicks are quarantined (D34)."""
+    _objective_column(platform, table)
     period = _period_reasons(platform, table, notes)
     good: list[tuple[list[str], dict[str, Any]]] = []
     quarantined: list[QuarantinedRow] = []
@@ -207,10 +223,22 @@ def _performance(
         and all(f["conversions_integral"] for _, f in good)
     )
     pairs: list[Pair] = []
+    above = 0
     for cells, f in good:
         f.pop("conversions_integral")
+        over = f.pop("reported_above_clicks")
         observed = int(f["conversions_reported"]) if copy else None
+        if observed is not None and observed > f["clicks"]:
+            reason = f"observed conversions above clicks ({observed} > {f['clicks']})"
+            quarantined.append(_quarantine(table, cells, [reason]))
+            continue
+        above += over
         pairs.append((cells, PerformanceRow(**f, conversions_observed=observed)))
+    if above:
+        notes.append(
+            f"{platform}: reported conversions above clicks on {above} rows; kept (view-through, "
+            f"multi-event counting or reporting dates) and left out of the click-trial model"
+        )
     pairs, dup = _dedupe(
         table,
         pairs,

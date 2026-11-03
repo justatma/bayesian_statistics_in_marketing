@@ -49,6 +49,10 @@ INSIGHT_FIELDS = (
     "attribution_setting",
 )
 ACCOUNT_FIELDS = ("timezone_name", "currency")
+# Names and objective (D34) are not requested yet: adding account_name, campaign_name, adset_name,
+# ad_name (F2 §2) to INSIGHT_FIELDS changes the recorded insights URL that the frozen
+# meta_empty replay matches, and F2 lists no objective or optimization-goal field. entity_names
+# stay empty and objective None until the recordings are re-made (manifest D34 open questions).
 # Purchase action types F2 §3 lists, in order of preference. Families overlap (omni_purchase rolls
 # up pixel, app and onsite purchases), so one type is chosen per pull and never summed: the first
 # in this order that appears anywhere in the pull. Which the owner's pixel reports: F2 open q. 6.

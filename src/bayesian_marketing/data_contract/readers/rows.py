@@ -26,6 +26,9 @@ def ungroup(v: str, grouped: re.Pattern[str]) -> str:
 
 
 ENTITY_KEYS = ("account", "campaign", "ad_set", "ad")
+# channels.yaml maps name columns to ``entity_ids.<key>_name``; they land in entity_names (D34).
+NAME_SUFFIX = "_name"
+OBJECTIVE = "objective"  # table target for the campaign objective / result type (D34)
 
 
 @dataclass
@@ -143,11 +146,25 @@ class RowReader:
         return out
 
 
+def counts_view_through(window: str) -> bool:
+    """Whether an attribution window label counts view-through conversions ("7d_click_1d_view",
+    Meta "7-day click or 1-day view"). Labels follow channels.yaml defaults and the export."""
+    return "view" in window.lower()
+
+
 def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] | None, list[str]]:
-    """PerformanceRow fields (without conversions_observed, set by C8 later), or reasons."""
+    """PerformanceRow fields (without conversions_observed, set by C8 later), or reasons.
+
+    Reported conversions above clicks (D34) are kept when the row's attribution window counts
+    view-through conversions, which clicks cannot bound; ``reported_above_clicks`` marks such a
+    row for the pull note and is popped before the row is built. Under a click-only or unstated
+    window the row stays quarantined: the frozen P1 fuzz requires it for Google Ads, whose
+    window is per conversion action (manifest D34 open question 1).
+    """
     r = RowReader(ctx, cells)
     d = r.date()
     ids = {k: v for k in ENTITY_KEYS if (v := r.get(f"entity_ids.{k}")) is not None}
+    names = {k: v for k in ENTITY_KEYS if (v := r.get(f"entity_ids.{k}{NAME_SUFFIX}")) is not None}
     if "ad" not in ids:
         r.reasons.append("entity_ids.ad: missing")
     imp = r.count("impressions")
@@ -156,22 +173,30 @@ def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] |
     conv_d = r.number("conversions_reported", required=False)
     rev = r.number("revenue_reported", required=False)
     cur = r.currency()
+    window = r.text("attribution_window") or ctx.attribution_window
     if imp is not None and clk is not None and clk > imp:
         r.reasons.append(f"clicks above impressions ({clk} > {imp})")
-    if conv_d is not None and clk is not None and conv_d > clk:
-        r.reasons.append(f"conversions above clicks ({conv_d} > {clk})")
+    above = conv_d is not None and clk is not None and conv_d > clk
+    if above and not counts_view_through(window):
+        r.reasons.append(
+            f"conversions above clicks ({conv_d} > {clk}) under attribution window {window!r}, "
+            f"which counts no view-through"
+        )
     if r.reasons:
         return None, r.reasons
     assert cur is not None and spend is not None
     return {
         "entity_ids": ids,
+        "entity_names": names,
+        "objective": r.text(OBJECTIVE),
         "date": d,
         "impressions": imp,
         "clicks": clk,
         "spend": Money(amount=spend, currency=cur),
         "conversions_reported": None if conv_d is None else float(conv_d),
         "conversions_integral": conv_d is not None and conv_d == conv_d.to_integral_value(),
-        "attribution_window": r.text("attribution_window") or ctx.attribution_window,
+        "reported_above_clicks": above,
+        "attribution_window": window,
         "revenue_reported": None if rev is None else Money(amount=rev, currency=cur),
     }, []
 
