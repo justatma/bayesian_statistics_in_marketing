@@ -1,0 +1,47 @@
+# Google Ads reports fractional conversions under data-driven attribution, and the orders file
+# carries no utm, so only conversions_reported exists for each ad (§5.2 C6: gamma_obs, capped
+# at marginal, "platform-modeled conversions").
+scenario: fractional_conversions
+description: §5.2 C6 cap
+client_id: frac_co
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 14
+platforms:
+  google_ads:
+    utm_source: google
+    utm_medium: cpc
+    click_window_days: 30
+    orders_joinable: false
+    fractional_credit: {beta_a: 2.0, beta_b: 2.0, decimals: 2}
+lag: {median_days: 1}
+order_value: {dist: lognormal, median: 75.0, sigma: 0.5, ad_log_sd: 0.05}
+economics:
+  variable_cost_per_order: "40.00"
+  price_source: modeled_aov
+  loss_tolerance: "50.00"
+  source: synthetic scenario fractional_conversions
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+ads:
+  - variant: A
+    platform: google_ads
+    account: {id: "123-456-7002", name: Frac Co}
+    campaign: {id: "2101", name: Shopping}
+    ad_set: {id: "3101", name: All products}
+    ad: {id: "4101", name: Ad A}
+    utm_campaign: frac_a
+    truth: {ctr: 0.025, cvr: 0.035, cpc: 1.2}
+    phases:
+      - {days: 14, spend_per_day: "60.00"}
+  - variant: B
+    platform: google_ads
+    account: {id: "123-456-7002", name: Frac Co}
+    campaign: {id: "2101", name: Shopping}
+    ad_set: {id: "3101", name: All products}
+    ad: {id: "4102", name: Ad B}
+    utm_campaign: frac_b
+    truth: {ctr: 0.025, cvr: 0.025, cpc: 1.2}
+    phases:
+      - {days: 14, spend_per_day: "60.00"}
