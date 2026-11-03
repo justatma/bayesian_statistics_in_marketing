@@ -99,6 +99,50 @@ def test_publish_identical_is_idempotent_and_new_data_supersedes() -> None:
     assert status.status_of("q_old00001").status == "marginal"
 
 
+def test_publish_rate_cannot_claim_inherited_basis() -> None:
+    q = B.quantity(
+        "ctr", estimate=B.beta_spec(2, 20), feas=B.feasibility("estimable", basis="inherited")
+    )
+    with pytest.raises(C.GateFailure) as ei:
+        status.publish(q)
+    assert ei.value.result.gate == "G2"
+    signed = B.quantity("contribution", feas=B.feasibility("marginal", basis="inherited"))
+    status.publish(signed)
+    bad_signed = B.quantity(
+        "contribution", feas=B.feasibility("marginal"), quantity_id="q_signed02"
+    )
+    with pytest.raises(C.GateFailure):
+        status.publish(bad_signed)
+
+
+def test_i5_holds_without_supersedes() -> None:
+    lag = registries.resolve("phrasing/notices/lag_approx@v1")
+    est = B.beta_spec(400, 19600)
+    worse = B.quantity("ctr", estimate=est, notices=[lag], quantity_id="q_worse001")
+    worse = worse.model_copy(update={"feasibility": quantity_feasibility(worse, _target())})
+    status.publish(worse)
+    better = B.quantity(
+        "ctr", estimate=est, feas=B.feasibility("estimable"), quantity_id="q_bet001"
+    )
+    with pytest.raises(C.GateFailure) as ei:
+        status.publish(better)  # same scope and name, same pulls, no supersedes
+    assert any("strict superset" in r for r in ei.value.result.reasons)
+    newer = B.quantity(
+        "ctr",
+        estimate=est,
+        feas=B.feasibility("estimable"),
+        quantity_id="q_bet002",
+        pulls=[B.META_PULL, "pull_meta_00000002"],
+    )
+    status.publish(newer)
+    # Republishing the same id with a different supersedes refuses.
+    relinked = newer.model_copy(
+        update={"feasibility": B.feasibility("estimable", supersedes="q_worse001")}
+    )
+    with pytest.raises(status.StatusImmutableError):
+        status.publish(relinked)
+
+
 def test_publish_rejects_claim_that_disagrees_with_floor() -> None:
     q = B.quantity("cvr", estimate=B.beta_spec(9, 441), feas=B.feasibility("marginal"))
     with pytest.raises(C.GateFailure) as ei:
