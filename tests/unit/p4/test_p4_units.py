@@ -77,15 +77,90 @@ def test_publish_identical_is_idempotent_and_new_data_supersedes() -> None:
     old = B.quantity("ctr", feas=B.feasibility("marginal"), quantity_id="q_old00001")
     status.publish(old)
     status.publish(old)
+    same_pulls = B.quantity(
+        "ctr",
+        estimate=B.beta_spec(400, 19600),
+        feas=B.feasibility("estimable", supersedes="q_old00001"),
+        quantity_id="q_same0001",
+    )
+    with pytest.raises(C.GateFailure) as ei:
+        status.publish(same_pulls)
+    assert ei.value.result.gate == "G2"
+    assert any("strict superset" in r for r in ei.value.result.reasons)
     new = B.quantity(
         "ctr",
         estimate=B.beta_spec(400, 19600),
         feas=B.feasibility("estimable", supersedes="q_old00001"),
         quantity_id="q_new00001",
+        pulls=[B.META_PULL, "pull_meta_00000002"],
     )
     status.publish(new)
     assert status.status_of("q_new00001").supersedes == "q_old00001"
     assert status.status_of("q_old00001").status == "marginal"
+
+
+def test_publish_rejects_claim_that_disagrees_with_floor() -> None:
+    q = B.quantity("cvr", estimate=B.beta_spec(9, 441), feas=B.feasibility("marginal"))
+    with pytest.raises(C.GateFailure) as ei:
+        status.publish(q)  # the floor says below_floor
+    assert ei.value.result.gate == "G2"
+
+
+def test_regime_limited_status_does_not_project_required() -> None:
+    lag = registries.resolve("phrasing/notices/lag_approx@v1")
+    q = B.quantity("ctr", estimate=B.beta_spec(400, 19600), notices=[lag])
+    f = quantity_feasibility(q.model_copy(update={"n_events": 400.0}), _target())
+    assert f.status == "marginal"
+    assert f.required is None
+    assert any("regime mismatch" in r for r in f.reasons)
+
+
+def test_unknown_event_count_keeps_available_an_event_count() -> None:
+    f = quantity_feasibility(B.quantity("cvr", estimate=B.beta_spec(9, 441)), _target())
+    assert f.available == 0.0 and f.required is None
+    assert any("event count unknown" in r for r in f.reasons)
+
+
+def test_target_differing_from_registry_is_refused() -> None:
+    t = C.PrecisionTarget(rel_half_width=0.5, level=0.9, caveat_rel_half_width=0.9)
+    with pytest.raises(ValueError):
+        quantity_feasibility(B.quantity("ctr"), t)
+
+
+def test_platform_modeled_is_not_a_regime_downgrade() -> None:
+    pm = registries.resolve("phrasing/notices/platform_modeled@v1")
+    q = B.quantity("ctr", estimate=B.beta_spec(400, 19600), notices=[pm])
+    assert quantity_feasibility(q, _target()).status == "estimable"
+
+
+def test_run_record_rejects_duplicates_and_replace(_store: Path) -> None:
+    import sqlite3
+
+    rr = B.run_record()
+    run_record.append(rr)
+    with pytest.raises(run_record.DuplicateRecordError):
+        run_record.append(rr)
+    rec = B.recommendation()
+    run_record.append(rec)
+    with pytest.raises(run_record.DuplicateRecordError):
+        run_record.append(rec)
+    con = sqlite3.connect(_store / run_record.DB_NAME)
+    try:
+        for sql in (
+            "INSERT OR REPLACE INTO run_records (seq, uid, payload) VALUES (1, 'x', '{}')",
+            "INSERT OR REPLACE INTO run_records (uid, payload) VALUES ('run_00000001', '{}')",
+        ):
+            with pytest.raises(sqlite3.DatabaseError):
+                con.execute(sql)
+                con.commit()
+            con.rollback()
+    finally:
+        con.close()
+    assert run_record.read("RunRecord") == [rr]
+    # Outcomes may repeat per recommendation.
+    run_record.append(B.outcome_record())
+    run_record.append(B.outcome_record())
+    assert len(run_record.read("OutcomeRecord")) == 2
 
 
 def test_run_record_filters_and_kinds() -> None:
@@ -120,6 +195,10 @@ def test_guarantee_refusals() -> None:
         }
     )
     assert "96%" in render_guarantee(full)
+    for blank in ("", "   "):
+        empty = full.model_copy(update={"slots": {**full.slots, "option": blank}})
+        with pytest.raises(LookupError):
+            render_guarantee(empty)
     with pytest.raises(LookupError):
         render_guarantee(full, locale="fr")
     wrong_kind = full.model_copy(update={"template_id": "expected_loss"})

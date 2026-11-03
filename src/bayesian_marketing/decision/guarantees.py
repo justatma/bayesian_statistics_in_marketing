@@ -6,6 +6,7 @@ marked provisional, or a kind mismatch is refused (D15).
 
 from __future__ import annotations
 
+from string import Formatter
 from typing import get_args
 
 from bayesian_marketing.core import Guarantee, registries
@@ -32,8 +33,13 @@ def render_guarantee(g: Guarantee, locale: str = "en") -> str:
         raise TemplateError(f"template {tid!r} is provisional and never rendered (D15)")
     if entry.get("kind") != g.kind:
         raise TemplateError(f"template {tid!r} is for kind {entry.get('kind')!r}, not {g.kind!r}")
+    template = str(entry["text"])
+    used = {field for _, field, _, _ in Formatter().parse(template) if field}
+    blank = sorted(k for k in used if k in g.slots and not g.slots[k].strip())
+    if blank:
+        raise TemplateError(f"template {tid!r} has empty slots {blank}")
     try:
-        text = str(entry["text"]).format_map(g.slots)
+        text = template.format_map(g.slots)
     except KeyError as e:
         raise TemplateError(f"template {tid!r} needs slot {e.args[0]!r}") from e
     return " ".join(text.split())

@@ -23,8 +23,10 @@ DECISION_KEY = "bounds/estimability/decision_loss"
 SIGNED_QUANTITIES: frozenset[str] = frozenset({"contribution", "contribution_per_click", "lift"})
 """Signed money quantities carry no precision status of their own (D10): basis 'inherited'."""
 
-REGIME_NOTICE_KEYS: tuple[str, ...] = ("lag_approx", "too_few_ads", "platform_modeled")
-"""phrasing.yaml notices marking a regime mismatch; each downgrades the status a level (§6.1)."""
+REGIME_NOTICE_KEYS: tuple[str, ...] = ("lag_approx", "too_few_ads")
+"""phrasing.yaml notices for the §6.1 regime mismatches "lag-adjusted approximation" and "funnel
+link not estimated". Each downgrades the status one level. "Attribution change in window" has no
+phrasing key yet (open question in spec/manifests/P4.md)."""
 
 NO_TOLERANCE_REASON = "no loss tolerance set"  # D16, verbatim
 
@@ -51,59 +53,84 @@ def _downgrade(status: str, steps: int) -> str:
     return _BY_RANK[max(0, STATUS_ORDER[status] - steps)]
 
 
+def registry_target() -> PrecisionTarget:
+    """The rate target as the registry states it (C1)."""
+    pw = registries.resolve(_ref(RATE_KEY))
+    return PrecisionTarget(
+        rel_half_width=float(pw["rel_half_width"]),
+        level=float(pw["level"]),
+        caveat_rel_half_width=float(pw["caveat_rel_half_width"]),
+    )
+
+
 def quantity_feasibility(q: Quantity, target: PrecisionTarget) -> Feasibility:
-    """Rate basis (D10): w = (q_hi - q_lo) / (2 * q50) at the target's level."""
+    """Rate basis (D10): w = (q_hi - q_lo) / (2 * q50) at the registry's level.
+
+    Thresholds come from the registry (C1). A ``target`` that differs from the registry is refused
+    rather than reported under the registry's bound_ref.
+    """
     if q.name in SIGNED_QUANTITIES:
         # D10: a signed quantity's status is the worst of its inputs, set where it is derived.
         return q.feasibility.model_copy(update={"basis": "inherited"})
 
-    if target.level not in _QUANTILES:
-        raise ValueError(f"precision level {target.level} unsupported; summary carries 0.90, 0.95")
-    lo_key, hi_key = _QUANTILES[target.level]
+    reg = registry_target()
+    if target != reg:
+        raise ValueError(f"precision target {target} differs from the registry's {reg}")
+    if reg.level not in _QUANTILES:
+        raise ValueError(f"precision level {reg.level} unsupported; summary carries 0.90, 0.95")
+    lo_key, hi_key = _QUANTILES[reg.level]
     s = q.estimate.summary
     q50 = s["q50"]
-    edge, caveat = target.rel_half_width, target.caveat_rel_half_width
+    edge, caveat = reg.rel_half_width, reg.caveat_rel_half_width
     reasons: list[str] = []
 
     if q50 <= 0:
         w = float("inf")
-        status = "below_floor"
+        width_status = "below_floor"
         reasons.append("median is not positive, so the relative half-width is undefined")
     else:
         w = (s[hi_key] - s[lo_key]) / (2.0 * q50)
         if w <= edge:
-            status = "estimable"
+            width_status = "estimable"
         elif w <= caveat:
-            status = "marginal"
+            width_status = "marginal"
             reasons.append(
-                f"{target.level:.0%} relative half-width {w:.4f} exceeds {edge:g} "
+                f"{reg.level:.0%} relative half-width {w:.4f} exceeds {edge:g} "
                 f"(within caveat edge {caveat:g})"
             )
         else:
-            status = "below_floor"
+            width_status = "below_floor"
             reasons.append(
-                f"{target.level:.0%} relative half-width {w:.4f} exceeds caveat edge {caveat:g}"
+                f"{reg.level:.0%} relative half-width {w:.4f} exceeds caveat edge {caveat:g}"
             )
 
     regime = _regime_notices()
     mismatches = [regime[n] for n in q.notices if n in regime]
-    if mismatches:
-        status = _downgrade(status, len(mismatches))
-        reasons.extend(mismatches)
+    status = _downgrade(width_status, len(mismatches))
+    reasons.extend(mismatches)
 
+    # available and required are both event counts (D22 item 5). Feasibility.available is a
+    # float in core, so an unknown count is recorded as 0.0 with a reason (open question).
     required: float | None = None
-    if q.n_events is not None:
+    if q.n_events is None:
+        available = 0.0
+        if status != "estimable":
+            reasons.append("event count unknown: available recorded as 0, required not projected")
+    else:
         available = float(q.n_events)
-        if status != "estimable" and w != float("inf") and q.n_events > 0:
+        if width_status != "estimable" and w != float("inf") and available > 0:
             required = available * (w / edge) ** 2
             reasons.append(
                 f"approximate: about {required:.0f} events needed for width {edge:g} "
                 "(projected from w proportional to n^-1/2)"
             )
-    else:
-        available = w if w != float("inf") else 0.0
-        if status != "estimable":
-            reasons.append("event count unknown: required events not projected")
+        elif status != "estimable":
+            reasons.append(
+                "required events not projected: the width meets the target, the status is "
+                "limited by a regime mismatch"
+                if width_status == "estimable"
+                else "required events not projected: no positive event count or width"
+            )
 
     return Feasibility(
         status=status,
