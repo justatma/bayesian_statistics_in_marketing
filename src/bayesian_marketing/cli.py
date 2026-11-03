@@ -25,6 +25,8 @@ PLATFORM_NAMES = {
     "ga4": "GA4",
     "orders": "orders file",
 }
+SHOWN_SHARES = 3
+"""Allocation shares named on the recommendation line; the rest are summed."""
 ACTIONS = {
     "allocate": "split the budget",
     "reallocate": "move budget",
@@ -131,10 +133,14 @@ class Narrator:
             action = ACTIONS.get(r.action, r.action)
             shares = (r.params or {}).get("allocation") or {}
             if r.action == "allocate" and shares:
+                ranked = sorted(shares.items(), key=lambda kv: -float(kv[1]))
                 split = ", ".join(
-                    f"{name(ad, ad)} {100 * float(s):.0f}%"
-                    for ad, s in sorted(shares.items(), key=lambda kv: -float(kv[1]))
+                    f"{name(ad, ad)} {100 * float(s):.0f}%" for ad, s in ranked[:SHOWN_SHARES]
                 )
+                rest = ranked[SHOWN_SHARES:]
+                if rest:
+                    left = 100 * sum(float(s) for _, s in rest)
+                    split += f", {_count(len(rest), 'other ad')} {left:.0f}% between them"
                 _say("Recommendation", f"{action}: {split}; needs human approval")
             elif r.action == "not_knowable":
                 reason = (r.params or {}).get("reason") or "; ".join(r.decision_feasibility.reasons)

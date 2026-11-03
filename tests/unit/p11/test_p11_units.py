@@ -84,9 +84,7 @@ def test_assemble_sums_rows_and_joins_orders_on_click_date() -> None:
         [_order("o1", "ca", 1, 2), _order("o2", "ca", 2, 2), _order("o3", "ca", 2, 9)],
     )
     utm = {"ca": {"meta": "a"}}
-    data = pipeline.assemble_funnel_data(
-        [perf, orders], None, dt.date(2026, 10, 2), utm_map=utm
-    )
+    data = pipeline.assemble_funnel_data([perf, orders], None, dt.date(2026, 10, 2), utm_map=utm)
     assert data.entities == ["a", "b"]
     assert data.clicks[0] == [15, 20]
     # o3 was ordered after as_of: not yet observed
@@ -201,7 +199,7 @@ def test_variants_must_share_one_platform(tmp_path: Path) -> None:
 
 
 def test_socket_edges(tmp_path: Path) -> None:
-    out, m = _dataset(tmp_path)
+    out, _ = _dataset(tmp_path)
     res = sock.compare(
         f"file://{out / MANIFEST_NAME}",
         metric="cvr",
@@ -233,7 +231,8 @@ def test_inventory_class_mapping() -> None:
     assert f("platform_attributed", "observational", True) == "simulation"
     assert f("deterministic", "none", False) == "deterministic derived quantity"
     assert f("platform_attributed", "observational", False) == "model inference / prediction"
-    assert f("platform_attributed", "randomized", False).startswith("experimental estimate (between")
+    between = "experimental estimate (between"
+    assert f("platform_attributed", "randomized", False).startswith(between)
     assert f("causally_incremental", "holdout", False) == "experimental estimate (incremental)"
     assert f("commercially_realized", "observational", False).endswith("commercially realized data")
 

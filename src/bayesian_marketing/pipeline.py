@@ -23,6 +23,7 @@ socket can answer later calls (evidence, narrative check, render) for that run i
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -115,6 +116,9 @@ CLIENT_NEEDS_ECONOMICS = (
 )
 G9_REQUIREMENT = "approved economics with a loss tolerance are needed before any decision"
 INHERITED_REASON = "inherits the worst status of its inputs ({inputs}) (D10)"
+NON_FINITE_REASON = (
+    "the posterior has no finite spread for this quantity with the data seen (too few events)"
+)
 NO_INPUTS_REASON = "no input status to inherit: {inputs} not estimable for this ad"
 
 
@@ -687,10 +691,18 @@ def derive_all(
             except NotEstimable as e:
                 missing.setdefault(variant, {})[name] = e.reason
                 continue
+            if not all(math.isfinite(v) for v in q.estimate.summary.values()):
+                missing.setdefault(variant, {})[name] = NON_FINITE_REASON
+                continue
             if name in CONVERSION_BASED and extra_notices:
                 q = q.model_copy(update={"notices": [*q.notices, *extra_notices]})
             if name not in SIGNED_QUANTITIES:
-                q = q.model_copy(update={"feasibility": quantity_feasibility(q, target)})
+                try:
+                    feas = quantity_feasibility(q, target)
+                except ArithmeticError as e:  # e.g. an overflowing width projection
+                    missing.setdefault(variant, {})[name] = f"{NON_FINITE_REASON} ({e})"
+                    continue
+                q = q.model_copy(update={"feasibility": feas})
             got[name] = q
         for name, q in list(got.items()):
             if name in SIGNED_QUANTITIES:
