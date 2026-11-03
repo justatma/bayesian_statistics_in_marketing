@@ -1,0 +1,35 @@
+# 3 accounts x 4 campaigns x 10 ads on one platform, drawn from a hierarchy (§5.2 C1, C8).
+# Load for SBC and the hierarchical model.
+scenario: many_accounts
+description: 3 accounts x 4 campaigns x 10 ads; SBC load
+client_id: many_co
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 7
+platforms:
+  meta: {utm_source: facebook, utm_medium: paid}
+lag: {median_days: 1}
+order_value: {dist: lognormal, median: 65.0, sigma: 0.6, ad_log_sd: 0.15}
+economics:
+  variable_cost_per_order: "35.00"
+  price_source: modeled_aov
+  loss_tolerance: "100.00"
+  source: synthetic scenario many_accounts
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+population:
+  platform: meta
+  accounts: 3
+  campaigns_per_account: 4
+  ads_per_campaign: 10
+  ctr_median: 0.015
+  cvr_median: 0.03
+  logit_sd: {account: [0.2, 0.2], campaign: [0.2, 0.2], ad: [0.4, 0.4]}
+  ad_rho: -0.3
+  cpm_median: 10.0
+  cpm_log_sd: 0.2
+  spend_per_day: "30.00"
+  id_prefix: ma_
+  names: {account: "Many Co {i}", campaign: "Campaign {i}.{j}", ad_set: "Ad set {i}.{j}",
+          ad: "Ad {i}.{j}.{k}"}
