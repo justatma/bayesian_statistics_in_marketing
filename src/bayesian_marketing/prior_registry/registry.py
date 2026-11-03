@@ -276,7 +276,7 @@ def _default_prior(parameter_path: str) -> PriorRecord | None:
         spec = (reg.get(table) or {}).get(parameter_path)
         if spec is None:
             continue
-        e = reg[elic_key]
+        e = spec.get("elicitation") or reg[elic_key]  # per-record override (D32)
         ref = f"priors/default/{table}/{parameter_path}@{version}"
         approved_at = _as_dt(e["approved_at"]) if e.get("approved_at") else None
         elic = ElicitationRecord(

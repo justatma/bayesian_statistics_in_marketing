@@ -1,0 +1,15 @@
+{
+ "config": {
+  "client_id": "recording",
+  "timezone": "UTC",
+  "currency": "USD",
+  "accounts": {
+   "ga4": "342974352"
+  },
+  "economics_path": null
+ },
+ "window": [
+  "2023-01-02",
+  "2023-01-08"
+ ]
+}

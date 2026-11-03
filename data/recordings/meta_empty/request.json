@@ -1,0 +1,15 @@
+{
+ "config": {
+  "client_id": "recording",
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "accounts": {
+   "meta": "act_2543868002525860"
+  },
+  "economics_path": null
+ },
+ "window": [
+  "2026-10-01",
+  "2026-10-07"
+ ]
+}
