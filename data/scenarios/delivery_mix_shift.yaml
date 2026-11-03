@@ -1,0 +1,48 @@
+# Manuscript ch. 10 (§9.2 "Delivery mix"): clicks move from 800/200 to 300/700 between an ad
+# converting at 5% and one at 1%, so blended orders per 1,000 clicks fall from 42 to 22 with no
+# change in either ad. Clicks per phase are fixed; conversions are drawn.
+scenario: delivery_mix_shift
+description: "Ch. 10: 42 -> 22 orders per 1,000 clicks"
+client_id: mix_co
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 14
+platforms:
+  meta: {utm_source: facebook, utm_medium: paid}
+lag: {median_days: 0}
+order_value: {dist: fixed, amount: "80.00"}
+economics:
+  variable_cost_per_order: "48.00"
+  price_source: fixed
+  fixed_price: "80.00"
+  loss_tolerance: "50.00"
+  source: synthetic scenario delivery_mix_shift
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+ads:
+  - variant: A
+    platform: meta
+    account: {id: mix_acc1, name: Mix Co}
+    campaign: {id: mix_c1, name: Always on}
+    ad_set: {id: mix_as1, name: Broad}
+    ad: {id: mix_a, name: Ad A}
+    utm_campaign: mix_a
+    truth: {ctr: 0.015, cvr: 0.05}
+    phases:
+      - {days: 7, spend: "1000.00", clicks: 800}
+      - {days: 7, spend: "375.00", clicks: 300}
+  - variant: B
+    platform: meta
+    account: {id: mix_acc1, name: Mix Co}
+    campaign: {id: mix_c1, name: Always on}
+    ad_set: {id: mix_as1, name: Broad}
+    ad: {id: mix_b, name: Ad B}
+    utm_campaign: mix_b
+    truth: {ctr: 0.015, cvr: 0.01}
+    phases:
+      - {days: 7, spend: "250.00", clicks: 200}
+      - {days: 7, spend: "875.00", clicks: 700}
+notes:
+  mix_orders_per_1000_clicks: {before: 42.0, after: 22.0}
+  mix_phase_days: [7, 7]

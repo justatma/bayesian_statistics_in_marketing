@@ -65,7 +65,8 @@ class PlatformPull(Frozen):
     rows: list[PerformanceRow] | list[OrderRow] | list[SiteRow]
     quarantined: list[QuarantinedRow]
     partial_truth: bool
-    measurement_changes: list[str]
+    measurement_changes: list[str]  # attribution/measurement changes in window only (§5.1 C5)
+    notes: list[str] = Field(default_factory=list)  # reader disclosures that are not C5 (D24)
     empty_account: bool = False  # §5.1 C6
     timezone: str | None = None  # account timezone the dates were normalized from (§5.1 C2)
     pulled_at: datetime

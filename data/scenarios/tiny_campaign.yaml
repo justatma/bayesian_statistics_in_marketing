@@ -1,0 +1,41 @@
+# Too little data: a few clicks and almost no conversions per ad. Rates and the decision sit
+# below floor; reports render "not knowable yet".
+scenario: tiny_campaign
+description: Rates and decision below floor
+client_id: tiny_co
+currency: USD
+utc_offset: "+00:00"
+start_date: 2026-10-20
+n_days: 5
+platforms:
+  linkedin: {utm_source: linkedin, utm_medium: paid}
+lag: {median_days: 1}
+order_value: {dist: lognormal, median: 120.0, sigma: 0.5, ad_log_sd: 0.1}
+economics:
+  variable_cost_per_order: "60.00"
+  price_source: modeled_aov
+  loss_tolerance: "25.00"
+  source: synthetic scenario tiny_campaign
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+ads:
+  - variant: A
+    platform: linkedin
+    account: {id: "50100001", name: Tiny Co}
+    campaign: {id: "60100001", name: Pilot}
+    ad_set: {id: "70100001", name: Pilot audience}
+    ad: {id: "80100001", name: Creative A}
+    utm_campaign: tiny_a
+    truth: {ctr: 0.006, cvr: 0.02, cpc: 6.0}
+    phases:
+      - {days: 5, spend_per_day: "10.00"}
+  - variant: B
+    platform: linkedin
+    account: {id: "50100001", name: Tiny Co}
+    campaign: {id: "60100001", name: Pilot}
+    ad_set: {id: "70100001", name: Pilot audience}
+    ad: {id: "80100002", name: Creative B}
+    utm_campaign: tiny_b
+    truth: {ctr: 0.005, cvr: 0.03, cpc: 6.0}
+    phases:
+      - {days: 5, spend_per_day: "10.00"}
