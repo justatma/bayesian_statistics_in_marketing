@@ -10,12 +10,21 @@ from typing import Any
 
 from bayesian_marketing.core import Money, OrderRow, SiteRow
 from bayesian_marketing.data_contract.readers.currencies import is_iso_4217
-from bayesian_marketing.data_contract.readers.table import Table
+from bayesian_marketing.data_contract.readers.table import EMPTY_MARKERS, Table
 
 _INT = re.compile(r"^-?\d+$")
 _NUM = re.compile(r"^-?\d+(\.\d+)?$")
+# Strict comma grouping only: 1,000 / 12,345,678 / 1,500.50. Anything else stays quarantined.
+_GROUPED_INT = re.compile(r"^-?\d{1,3}(,\d{3})+$")
+_GROUPED_NUM = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
+
+
+def ungroup(v: str, grouped: re.Pattern[str]) -> str:
+    """Strip thousands separators from a strictly grouped number; leave anything else alone."""
+    return v.replace(",", "") if grouped.match(v) else v
+
+
 ENTITY_KEYS = ("account", "campaign", "ad_set", "ad")
-EMPTY_MARKERS = ("", "--")  # "--" is an empty cell in platform UIs (F1 M17, G12: UNKNOWN in files)
 
 
 @dataclass
@@ -62,6 +71,7 @@ class RowReader:
         v = self.need(target) if required else self.get(target)
         if v is None:
             return None
+        v = ungroup(v, _GROUPED_INT)
         if not _INT.match(v):
             self.reasons.append(f"{target}: not an integer ({v!r})")
             return None
@@ -75,6 +85,7 @@ class RowReader:
         v = self.need(target) if required else self.get(target)
         if v is None:
             return None
+        v = ungroup(v, _GROUPED_NUM)
         if not _NUM.match(v):
             self.reasons.append(f"{target}: not a plain number ({v!r})")
             return None

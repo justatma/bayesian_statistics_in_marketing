@@ -151,17 +151,25 @@ def _objective_checks(platform: Platform, table: Table) -> list[str]:
                 f"{platform}: conversions_reported taken from {rule['preferred']!r}; "
                 f"objective-dependent {rule['dependent']!r} present and not used on {ignored} rows"
             )
-    elif dep is not None:
-        log.warning(
-            "%s: conversions_reported taken from objective-dependent %r column",
-            platform,
-            rule["dependent"],
-        )
+    objectives: list[str] = []
     if dep is not None and ind is not None:
         objectives = sorted({v for c in table.rows if (v := table.cell(c, ind)) is not None})
         if len(objectives) > 1:
             notes.append(
                 f"{platform}: mixed objectives in {rule['dependent']!r}: {', '.join(objectives)}"
+            )
+    if dep is not None and pref is None:
+        if len(objectives) == 1:
+            notes.append(
+                f"{platform}: conversions_reported taken from objective-dependent "
+                f"{rule['dependent']!r} (objective {objectives[0]})"
+            )
+        elif not objectives:
+            # Frozen test meta_aliases asserts measurement_changes == [] here (manifest Q5).
+            log.warning(
+                "%s: conversions_reported taken from objective-dependent %r column",
+                platform,
+                rule["dependent"],
             )
     return notes
 

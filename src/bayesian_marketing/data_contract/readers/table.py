@@ -15,7 +15,14 @@ from typing import Any
 CURRENCY_SLOT = "{currency}"
 DELIMITERS = (",", "\t", ";")
 _EXCEL_TEXT = re.compile(r'^="(.*)"$', re.DOTALL)  # Google Ads id cells: ="123" (F1 G6)
-SUMMARY_SEPARATORS = (":", " -", " \u2013")  # "Total: Account", "Total - ..." (F1 G5)
+ID_FIELDS = (
+    "entity_ids.account",
+    "entity_ids.campaign",
+    "entity_ids.ad_set",
+    "entity_ids.ad",
+    "order_id",
+)
+EMPTY_MARKERS = ("", "--")  # "--" is an empty cell in platform UIs (F1 M17, G12: UNKNOWN in files)
 
 
 class TableError(ValueError):
@@ -75,13 +82,16 @@ def header_field(header: str, export_map: dict[str, str]) -> tuple[str, int, str
     return None
 
 
-def is_summary_row(first_cell: str, prefix: str) -> bool:
-    """A summary row: first cell exactly ``prefix`` or ``prefix`` then ``:`` / `` -``.
-
-    "Total Eclipse" is data; "Total", "Total: Account" and "Total - Campaign" are summaries.
+def is_summary_row(cells: list[str], prefix: str, id_cols: list[int]) -> bool:
+    """A summary row by structure (F1 G5): the first cell is ``prefix`` alone (trailing
+    punctuation allowed) or ``prefix: <label>`` as in "Total: Account", AND every entity id
+    column is empty. "Total Eclipse", "Total - Black Friday", or "Total: X" next to an ad id are
+    data rows.
     """
-    c, p = norm(first_cell), norm(prefix)
-    return c == p or any(c.startswith(p + sep) for sep in SUMMARY_SEPARATORS)
+    c, p = norm(cells[0]), norm(prefix)
+    if not (re.fullmatch(re.escape(p) + r"[\W_]*", c) or c.startswith(p + ":")):
+        return False
+    return all(col >= len(cells) or cells[col] in EMPTY_MARKERS for col in id_cols if col != 0)
 
 
 @dataclass
@@ -105,7 +115,7 @@ class Table:
         return None
 
     def cell(self, cells: list[str], col: int | None) -> str | None:
-        if col is None or col >= len(cells) or cells[col] == "":
+        if col is None or col >= len(cells) or cells[col] in EMPTY_MARKERS:
             return None
         return cells[col]
 
@@ -175,13 +185,14 @@ def _build(
             best[target] = (rank, col)
     if len(currencies) > 1:
         raise TableError(f"header names more than one currency: {sorted(currencies)}")
+    id_cols = [c for f in ID_FIELDS for c in candidates.get(f, [])]
     rows: list[list[str]] = []
     summary: list[list[str]] = []
     for r in body:
         cells = [clean_cell(c) for c in r]
         if not any(cells):
             continue
-        if drop_prefix and is_summary_row(cells[0], drop_prefix):
+        if drop_prefix and is_summary_row(cells, drop_prefix, id_cols):
             summary.append(cells)
             continue
         rows.append(cells)

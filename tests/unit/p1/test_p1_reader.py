@@ -279,3 +279,57 @@ def test_F11_quoted_multiline_cell(tmp_path: Path) -> None:
 
     pull = _read("google_ads", _gads(tmp_path, edit))
     assert pull.quarantined == [] and len(pull.rows) == 4
+
+
+# --- review fixes round 2 -------------------------------------------------------------------------
+
+GH = "Campaign,Day,Ad ID,Impr.,Clicks,Cost,Currency code"
+
+
+def test_R2A_summary_only_by_structure(tmp_path: Path) -> None:
+    lines = [
+        "Report",
+        GH,
+        "Total - Black Friday,2026-11-01,ad_a,100,5,1.50,USD",
+        "Total: Spring,2026-11-01,ad_b,100,5,1.50,USD",
+        "Total: Account,,,200,10,3.00,USD",
+        "Total.,,,200,10,3.00,USD",
+    ]
+    pull = _read("google_ads", _write(tmp_path, "g.csv", lines))
+    assert sorted(r.entity_ids["ad"] for r in pull.rows) == ["ad_a", "ad_b"]
+    assert pull.quarantined == []
+    only = _write(tmp_path, "g2.csv", lines[:3])
+    pull = _read("google_ads", only)
+    assert pull.empty_account is False and len(pull.rows) == 1
+
+
+def test_R2C_results_single_objective_noted(tmp_path: Path) -> None:
+    lines = (FIX / "meta_aliases.csv").read_text().splitlines()
+    out = [lines[0] + ",Result indicator", *[ln + ",purchase" for ln in lines[1:]]]
+    pull = _read("meta", _write(tmp_path, "meta.csv", out))
+    assert any(
+        "objective-dependent 'Results' (objective purchase)" in n for n in pull.measurement_changes
+    )
+
+
+def test_R2D_thousands_separators(tmp_path: Path) -> None:
+    head = "Day,Ad ID,Impr.,Clicks,Cost,Currency code,Conversions"
+    lines = [
+        head,
+        '2026-11-01,ad_a,"1,000",50,"1,500.50",USD,1',
+        '2026-11-01,ad_b,"1,00",50,1.50,USD,1',
+        '2026-11-01,ad_c,100,5,"1,5000.00",USD,1',
+    ]
+    pull = _read("google_ads", _write(tmp_path, "g.csv", lines))
+    assert [(r.impressions, r.spend.amount) for r in pull.rows] == [(1000, Decimal("1500.50"))]
+    assert len(pull.quarantined) == 2
+
+
+def test_R2E_dash_reporting_ends_is_blank(tmp_path: Path) -> None:
+    lines = [
+        "Reporting starts,Reporting ends,Ad ID,Impressions,Link clicks,Amount spent (USD)",
+        "2026-11-01,--,ad_a,1000,50,10",
+        "2026-11-02,2026-11-03,ad_a,1000,50,10",
+    ]
+    pull = _read("meta", _write(tmp_path, "meta.csv", lines))
+    assert len(pull.rows) == 1 and "non-daily" in pull.quarantined[0].reasons[0]
