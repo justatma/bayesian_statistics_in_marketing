@@ -153,9 +153,10 @@ def test_money_tokens(text: str, ok: bool) -> None:
 def test_report_labels_evidence_on_comparisons_and_recommendations(tmp_path: Path) -> None:
     b = _mk()
     html = Path(render(b, tmp_path).html_path).read_text()
-    plain = "what the ad platform counted as delivered"
+    # D38.7: a contribution comparison is labelled with what the platform credited to the ads.
+    credited = "what the ad platform credited to the ads"
     caption = html.split('<h2 id="h-comp">')[1].split("</caption>")[0]
-    assert plain in caption
+    assert credited in caption
     rec = html.split('<article class="rec">')[1].split("</article>")[0]
-    assert "Evidence" in rec and plain in rec
+    assert "Evidence" in rec and "what the ad platform" in rec
     assert "90% range" in html
