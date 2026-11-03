@@ -97,6 +97,15 @@ def _conversions(data: FunnelData, i: int, d: int) -> float | None:
     return None if rep is None else float(rep)
 
 
+def _cvr_conversions(data: FunnelData, i: int, d: int) -> float | None:
+    """Conversions the CVR check may use: reported counts above clicks are left out, as in the
+    click-trial likelihood (D34)."""
+    c = _conversions(data, i, d)
+    if c is not None and data.conversions_observed[i][d] is None and c > data.clicks[i][d]:
+        return None
+    return c
+
+
 def _mid_p(rep: np.ndarray, obs: float) -> float:
     return float(np.mean(rep > obs) + 0.5 * np.mean(rep == obs))
 
@@ -148,7 +157,7 @@ def _ppc_cvr(data: FunnelData, draws: _Draws, rng: np.random.Generator) -> float
             continue
         conv, trials, seen = 0.0, 0.0, False
         for d in _paid_days(data, i):
-            c = _conversions(data, i, d)
+            c = _cvr_conversions(data, i, d)
             if c is None:
                 continue
             seen = True
