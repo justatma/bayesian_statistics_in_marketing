@@ -62,6 +62,9 @@ jax.config.update("jax_enable_x64", True)  # counts reach 1e6+; float32 Poisson/
 
 PARAMS = ("ctr", "cvr", "cpm", "aov")
 THRESHOLDS_REF = "diagnostics/thresholds@v1"
+PROB_CEILING_GAP = 1e-7
+"""Numeric guard: a binomial probability is kept at most 1 - this, so its log(1 - p) stays finite.
+Not a modelling bound (a CVR times maturity this close to 1 is refused by no data)."""
 TAIL_PROBS = (0.05, 0.95)
 """Tail-ESS quantiles, the ArviZ convention."""
 
@@ -143,7 +146,7 @@ def make_model(plan: ModelPlan, n_ads: int, n_days: int, n_groups: dict[str, int
 
         # CVR with the exact lag likelihood (§5.6 C2).
         cmask = d["conv_mask"] > 0
-        p = jnp.clip(cvr_day * d["mature"], eps, 1.0 - 1e-7)
+        p = jnp.clip(cvr_day * d["mature"], eps, 1.0 - PROB_CEILING_GAP)
         numpyro.sample(
             "conversions",
             dist.Binomial(total_count=d["clicks"], probs=jnp.where(cmask, p, 0.5)).mask(cmask),
@@ -167,7 +170,12 @@ def make_model(plan: ModelPlan, n_ads: int, n_days: int, n_groups: dict[str, int
             mu_v = h["value.mu_loc"] + h["value.mu_scale"] * z_v + 0.0 * m_v
         vmask = d["value_mask"]
         if stages["value"] == "lognormal":
-            sd_v = numpyro.sample("value_sd", dist.HalfNormal(h["value.sd_scale"]))
+            # D36 item 2: half-normal truncated below at min_log_sd, so one price point (all
+            # orders the same value) does not drive the sd to zero.
+            sd_v = numpyro.sample(
+                "value_sd",
+                dist.TruncatedNormal(0.0, h["value.sd_scale"], low=h["value.min_log_sd"]),
+            )
             n = d["value_n"]
             ll = (
                 -n * jnp.log(sd_v)

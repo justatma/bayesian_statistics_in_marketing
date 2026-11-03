@@ -9,12 +9,12 @@ Prior resolution, per parameter path the spec needs:
 
 1. the PriorSet record. An unapproved record raises G8 on client data (I10); on synthetic data it
    is allowed and counted in ``unapproved`` (D23 item 2).
-2. a path missing from the PriorSet raises G8 on client data (D28 item 2). On synthetic data only,
-   it falls back to a registry ``priors/default`` ``pending_records`` placeholder if one exists
-   (none since D32), counted in ``unapproved`` and disclosed (``route.unapproved_priors``).
+2. a path missing from the PriorSet raises G8 on client data (D28 item 2), ``lkj_concentration``
+   included (D36 item 1). On synthetic data only, it falls back to the registry ``priors/default``
+   record (``records``, else ``pending_records``), counted in ``unapproved`` and disclosed
+   (``route.unapproved_priors``) (D36 item 3). A path the registry lacks too raises G8.
 
-The LKJ concentration falls back to ``bounds/coupling/lkj_eta`` (an approved §14 default) when the
-PriorSet has no ``lkj_concentration`` record.
+The within-ad log order-value sd is floored at ``bounds/value/min_log_sd`` (D36 item 2).
 
 Hyperpriors are read off the records:
 
@@ -153,30 +153,40 @@ def resolve_term(priors: PriorSet, path: str, synthetic: bool) -> PriorTerm:
             approved=rec.approved,
             source="prior_set",
         )
-    if not synthetic:  # D28 item 2: no unapproved fallback ever prices client data
+
+    def missing(why: str) -> GateFailure:
         res = GateResult(
             gate="G8",
             passed=False,
             blocking=True,
-            reasons=[f"no approved prior for {path!r} in the PriorSet (I10)"],
+            reasons=[f"no approved prior for {path!r} in the PriorSet{why} (I10)"],
             inputs_hash=inputs_hash({"missing": path}),
             checked_at=utcnow(),
         )
-        raise GateFailure(res)
-    # Empty since D32 moved the placeholders into `records`; kept for any future pending entry.
-    pending = registries.load("priors/default").get("pending_records") or {}
-    if path not in pending:
-        raise KeyError(f"PriorSet has no record for {path!r} and the registry no placeholder")
-    rec_d = pending[path]
-    params = {k: float(v) for k, v in rec_d["params"].items()}
-    return PriorTerm(
-        path=path,
-        family=str(rec_d["family"]),
-        params=params,
-        prior_id=make_id("pr_", {"pending": path, "params": params}),
-        approved=False,
-        source="registry_pending",
-    )
+        return GateFailure(res)
+
+    if not synthetic:  # D28 item 2: no fallback ever prices client data
+        raise missing("")
+    # D36 item 3: synthetic data falls back to the registry default record (``records``, else a
+    # ``pending_records`` placeholder), counted as unapproved because the PriorSet did not carry it.
+    reg = registries.load("priors/default")
+    for section, source in (
+        ("records", "registry_default"),
+        ("pending_records", "registry_pending"),
+    ):
+        rec_d = (reg.get(section) or {}).get(path)
+        if rec_d is None:
+            continue
+        params = {k: float(v) for k, v in rec_d["params"].items()}
+        return PriorTerm(
+            path=path,
+            family=str(rec_d["family"]),
+            params=params,
+            prior_id=make_id("pr_", {source: path, "params": params}),
+            approved=False,
+            source=source,
+        )
+    raise missing(" and the registry has no default for it")
 
 
 def _need(term: PriorTerm, family: str, *keys: str) -> None:
@@ -222,12 +232,9 @@ def resolve_plan_priors(
         _need(s, "halfnormal", "scale")
         hyper[f"{stage}.scale"] = s.params["scale"]
 
-    if "lkj_concentration" in priors.records:
-        t = term("lkj_concentration")
-        _need(t, "fixed", "value")
-        hyper["lkj_eta"] = t.params["value"]
-    else:
-        hyper["lkj_eta"] = float(registries.resolve("bounds/coupling/lkj_eta@v1"))
+    t = term("lkj_concentration")  # D36 item 1: required like every structural prior
+    _need(t, "fixed", "value")
+    hyper["lkj_eta"] = t.params["value"]
 
     t = term("cpm_impressions_per_dollar")
     _need(t, "gamma", "shape", "rate")
@@ -242,6 +249,8 @@ def resolve_plan_priors(
     _need(s, "halfnormal", "scale")
     hyper["value.sd_scale"] = s.params["scale"]
     hyper["value.scale"] = s.params["scale"] if pooled["value"] else 0.0
+    if stages["value"] == "lognormal":
+        hyper["value.min_log_sd"] = float(registries.resolve("bounds/value/min_log_sd@v1"))
     if stages["value"] == "compound_gamma":
         hyper["value.k"] = float(registries.resolve("bounds/value/compound_gamma_k@v1"))
 
@@ -427,6 +436,9 @@ def build_arrays(plan: ModelPlan, data: FunnelData) -> ModelArrays:
                 value_n[i] = float(values.size)
                 value_mean[i] = float(logs.mean())
                 value_ss[i] = float(((logs - logs.mean()) ** 2).sum())
+                if np.ptp(values) == 0:  # one price point (D36 item 2): report it as such
+                    params[f"{ad}.flag.single_price_point"] = 1.0
+                    params[f"{ad}.aov.single_price"] = float(values[0])
             orders = float(values.size)
         else:
             if cg_n > 0 and cg_r > 0:
@@ -446,6 +458,8 @@ def build_arrays(plan: ModelPlan, data: FunnelData) -> ModelArrays:
                 f"{ad}.flag.aov_orders_file": 1.0 if stages["value"] == "lognormal" else 0.0,
             }
         )
+        if stages["value"] == "lognormal":
+            params[f"{ad}.value.min_log_sd"] = plan.hyper["value.min_log_sd"]
         if stages["value"] == "compound_gamma":
             params[f"{ad}.flag.aov_source"] = 2.0  # placeholder k disclosed by derive
             params[f"{ad}.aov.compound_gamma_k"] = plan.hyper["value.k"]

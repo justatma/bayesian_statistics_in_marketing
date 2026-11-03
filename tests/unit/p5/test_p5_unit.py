@@ -96,29 +96,75 @@ def test_unapproved_prior_in_set_blocks_client_data_only() -> None:
 def test_missing_structural_prior_g8_on_client_fallback_on_synthetic(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """D28 item 2: a path the PriorSet lacks raises G8 on client data; on synthetic data it may
-    use a registry pending placeholder, counted for the unapproved-priors notice."""
-    reg = tmp_path / "registries"
-    shutil.copytree(registries.registry_root(), reg)
-    path = reg / "priors" / "default.yaml"
-    doc = yaml.safe_load(path.read_text())
-    doc["pending_records"] = {"logit_scale_ctr": {"family": "halfnormal", "params": {"scale": 1}}}
-    path.write_text(yaml.safe_dump(doc, sort_keys=False))
-    monkeypatch.setenv("BAYES_REGISTRY_DIR", str(reg))
-    registries.clear_cache()
-    try:
+    """D28 item 2 and D36 items 1, 3: a path the PriorSet lacks (lkj_concentration included)
+    raises G8 on client data; on synthetic data it falls back to the registry default record,
+    counted unapproved; a path the registry lacks too raises G8, never a bare KeyError."""
+    syn = _ads(8).model_copy(update={"synthetic": True})
+    for missing in ("logit_scale_ctr", "lkj_concentration"):
         recs = dict(B.default_prior_set().records)
-        recs.pop("logit_scale_ctr")
+        recs.pop(missing)
         priors = C.PriorSet(records=recs)
         with pytest.raises(C.GateFailure) as e:
             compile_model(B.funnel_spec(), priors, _ads(8))
         assert e.value.result.gate == "G8"
-        syn = _ads(8).model_copy(update={"synthetic": True})
         plan = load_plan(compile_model(B.funnel_spec(), priors, syn))
-        assert plan.unapproved == ["logit_scale_ctr"]
-        assert plan.terms["logit_scale_ctr"].source == "registry_pending"
+        assert plan.unapproved == [missing]
+        assert plan.terms[missing].source == "registry_default"
+        assert missing in plan.prior_ids
+        state, _ = (
+            S.NumpyroSampler().fit(compile_model(B.funnel_spec(), priors, syn), syn, _cfg())
+            if missing == "lkj_concentration"
+            else (None, None)
+        )
+        if state is not None:
+            assert state.posterior.params["route.unapproved_priors"] == 1.0
+            assert "unapproved" in " ".join(derive("ctr", state, B.scope("ad_0"), None).notices)
+
+    recs = dict(B.default_prior_set().records)
+    recs.pop("logit_scale_ctr")
+    reg = tmp_path / "registries"
+    shutil.copytree(registries.registry_root(), reg)
+    path = reg / "priors" / "default.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["records"].pop("logit_scale_ctr")
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    monkeypatch.setenv("BAYES_REGISTRY_DIR", str(reg))
+    registries.clear_cache()
+    try:
+        with pytest.raises(C.GateFailure) as e:
+            compile_model(B.funnel_spec(), C.PriorSet(records=recs), syn)
+        assert e.value.result.gate == "G8"
     finally:
         registries.clear_cache()
+
+
+def test_every_structural_term_recorded() -> None:
+    plan = load_plan(compile_model(B.funnel_spec(), B.default_prior_set(), _ads(8)))
+    assert set(plan.prior_ids) == {
+        "ctr",
+        "cvr",
+        "logit_scale_ctr",
+        "logit_scale_cvr",
+        "lkj_concentration",
+        "cpm_impressions_per_dollar",
+        "order_value_log_mean",
+        "order_value_log_sd",
+    }
+    assert plan.unapproved == []
+
+
+def test_single_price_point_fits_at_the_sd_floor() -> None:
+    """D36 item 2: every order at one price fits cleanly and is reported as one price point."""
+    data = _ads(8, order_values=[49.0] * 30).model_copy(update={"synthetic": True})
+    model = compile_model(B.funnel_spec(), B.default_prior_set(), data)
+    state, report = S.NumpyroSampler().fit(model, data, S.default_config(3))
+    p = state.posterior.params
+    assert p["ad_0.flag.single_price_point"] == 1.0 and p["ad_0.aov.single_price"] == 49.0
+    floor = registries.resolve("bounds/value/min_log_sd@v1")
+    assert p["ad_0.value.min_log_sd"] == floor
+    assert report.n_divergences == 0 and report.rhat_max < 1.01
+    aov = pd.read_parquet(state.posterior.samples_path)["ad_0.aov"]
+    assert abs(aov.median() / 49.0 - 1) < 0.01
 
 
 def test_fit_state_contract() -> None:
