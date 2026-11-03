@@ -23,7 +23,12 @@ DECISION_KEY = "bounds/estimability/decision_loss"
 SIGNED_QUANTITIES: frozenset[str] = frozenset({"contribution", "contribution_per_click", "lift"})
 """Signed money quantities carry no precision status of their own (D10): basis 'inherited'."""
 
-REGIME_NOTICE_KEYS: tuple[str, ...] = ("lag_approx", "too_few_ads", "joint_failed")  # D26
+REGIME_NOTICE_KEYS: tuple[str, ...] = (
+    "lag_approx",
+    "too_few_ads",
+    "joint_failed",  # D26
+    "platform_modeled",  # D28, §5.2 C6
+)
 """phrasing.yaml notices for the §6.1 regime mismatches "lag-adjusted approximation" and "funnel
 link not estimated". Each downgrades the status one level. "Attribution change in window" has no
 phrasing key yet (open question in spec/manifests/P4.md)."""
