@@ -93,7 +93,8 @@ REPORT_HTML = r"""<!doctype html>
       {% if r.benefit %}<dt>Expected benefit</dt><dd>{{ r.benefit }}</dd>{% endif %}
       {% if r.loss %}<dt>Expected loss</dt><dd>{{ r.loss }}</dd>{% endif %}
       <dt>Reversibility</dt><dd>{{ r.reversibility }}</dd>
-      <dt>Approval</dt><dd>requires human approval</dd>
+      <dt>What this counts</dt><dd>{{ r.evidence }}</dd>
+      <dt>Approval</dt><dd>{{ approval_text }}</dd>
     </dl>
   </article>
   {% endfor %}
@@ -104,9 +105,11 @@ REPORT_HTML = r"""<!doctype html>
 <section aria-labelledby="h-findings">
   <h2 id="h-findings">What the data shows</h2>
   <table>
-    <caption>Estimates with a 90% range. Each row says in plain words what was counted.</caption>
+    <caption>Estimates with a {{ level }} range. Each row says in plain words what was
+      counted.</caption>
     <thead><tr>
-      <th>Option</th><th>Measure</th><th class="num">Estimate</th><th class="num">90% range</th>
+      <th>Option</th><th>Measure</th><th class="num">Estimate</th>
+      <th class="num">{{ level }} range</th>
       <th>Status</th><th>What this counts</th>
     </tr></thead>
     <tbody>
@@ -132,7 +135,8 @@ REPORT_HTML = r"""<!doctype html>
   <h2 id="h-comp">Comparisons</h2>
   {% for c in comparisons %}
   <table>
-    <caption>Objective: {{ c.objective }} over the next {{ c.horizon }}.</caption>
+    <caption>Objective: {{ c.objective }} over the next {{ c.horizon }}. What this counts:
+      {{ c.evidence }}.</caption>
     <thead><tr><th>Option</th><th class="num">Chance of being best</th>
       <th class="num">Expected value</th><th class="num">Expected loss if chosen</th></tr></thead>
     <tbody>

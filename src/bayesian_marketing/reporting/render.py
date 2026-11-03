@@ -34,7 +34,17 @@ from bayesian_marketing.core import (
 )
 from bayesian_marketing.reporting.template import REPORT_HTML
 
-NO_SAMPLER = "exact conjugate model; no sampler ran"  # §12 C5 wording (open question 1)
+# Report wording not yet in phrasing.yaml (manifest open question 1: proposed keys
+# `no_sampler` and `approval_required`). Kept as named constants until the integrator adds them.
+NO_SAMPLER = "exact conjugate model; no sampler ran"  # §12 C5
+APPROVAL_TEXT = "requires human approval"  # §4.8 requires_human_approval
+LEVEL_REF = "bounds/estimability/posterior_width@v1"
+
+
+def _level_label() -> str:
+    """The registry interval level as a percent label, e.g. "90%"."""
+    level = float(registries.resolve(LEVEL_REF)["level"])
+    return f"{level * 100:g}%"
 
 
 def _fail(gate: str, reasons: list[str], payload: Any) -> GateFailure:
@@ -151,20 +161,29 @@ def _horizon(r: Recommendation) -> str:
     return f"{V.fmt_count(float(r.horizon.amount))} {r.horizon.unit}"
 
 
+def _evidence_plain(qs: list[Quantity], phr: dict[str, Any]) -> str | None:
+    """The weakest evidence class among the quantities, in plain words (§12 C4)."""
+    if not qs:
+        return None
+    return phr["evidence_plain"][lowest_evidence([q.evidence_class for q in qs])]
+
+
+def _rec_basis(r: Recommendation, bundle: ReportBundle) -> list[Quantity]:
+    return [q for q in bundle.quantities if q.quantity_id in r.basis] or bundle.quantities
+
+
 def _guarantee_prose(
     r: Recommendation, bundle: ReportBundle, phr: dict[str, Any], tmpl: dict[str, Any]
 ) -> str:
     entry = tmpl["templates"].get(r.guarantee.template_id)
-    basis = [q for q in bundle.quantities if q.quantity_id in r.basis] or bundle.quantities
+    basis = _rec_basis(r, bundle)
     slots: dict[str, Any] = {
         "horizon": _horizon(r),
         "assumption": "; ".join(r.guarantee.assumptions) or None,
         "expected_loss": V.fmt_money(r.expected_loss) if r.expected_loss else None,
     }
     if basis:
-        slots["evidence_plain"] = phr["evidence_plain"][
-            lowest_evidence([q.evidence_class for q in basis])
-        ]
+        slots["evidence_plain"] = _evidence_plain(basis, phr)
         routes = sorted({q.provenance.route for q in basis})
         slots["route_plain"] = ", ".join(phr["route_plain"][x] for x in routes)
     alloc = r.params.get("allocation")
@@ -198,12 +217,15 @@ def _recommendation(r: Recommendation, bundle: ReportBundle, phr, tmpl) -> dict[
         "benefit": V.fmt_money(r.expected_benefit) if r.expected_benefit and traced else None,
         "loss": V.fmt_money(r.expected_loss) if r.expected_loss and traced else None,
         "reversibility": r.reversibility,
+        "evidence": _evidence_plain(_rec_basis(r, bundle), phr) or phr["not_knowable"],
     }
 
 
-def _comparisons(bundle: ReportBundle) -> list[dict[str, Any]]:
+def _comparisons(bundle: ReportBundle, phr: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for c in bundle.comparisons:
+        about = [q for q in bundle.quantities if V.entities_of(q) & set(c.options)]
+        evidence = _evidence_plain(about or bundle.quantities, phr) or phr["not_knowable"]
         rows = [
             {
                 "option": o,
@@ -219,6 +241,7 @@ def _comparisons(bundle: ReportBundle) -> list[dict[str, Any]]:
                 "objective": c.objective.target,
                 "horizon": f"{V.fmt_count(float(h.amount))} {h.unit}",
                 "rows": rows,
+                "evidence": evidence,
             }
         )
     return out
@@ -317,7 +340,7 @@ def render(bundle: ReportBundle, out_dir: Path) -> RenderedReport:
         "narrative": narrative,
         "recommendations": [_recommendation(r, bundle, phr, tmpl) for r in bundle.recommendations],
         "findings": [_finding(q, phr) for q in shown],
-        "comparisons": _comparisons(bundle),
+        "comparisons": _comparisons(bundle, phr),
         "not_knowable": [_not_knowable(q, phr) for q in hidden],
         "know": _knowability(bundle, phr),
         "conjugate_phrase": NO_SAMPLER if conjugate else None,
@@ -341,6 +364,8 @@ def render(bundle: ReportBundle, out_dir: Path) -> RenderedReport:
             for q in bundle.quantities
         ],
         "inputs_hash": h,
+        "approval_text": APPROVAL_TEXT,
+        "level": _level_label(),
     }
     env = jinja2.Environment(autoescape=True, undefined=jinja2.StrictUndefined)
     html = env.from_string(REPORT_HTML).render(**ctx)

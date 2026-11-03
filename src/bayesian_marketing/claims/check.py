@@ -1,30 +1,36 @@
-"""§10 check_narrative (G5) and intake_prior_proposal.
+"""§10 check_narrative (G5) and intake_prior_proposal, with the D29 rulings.
 
-``check_narrative`` splits the block into sentences and, per sentence, finds the option names
-(entity ids known to the bundle), metric words, numbers, comparatives and causal verbs. Each
-rejection reason quotes the offending token as written.
+``check_narrative`` splits the block into sentences, and sentences into clauses. Each rejection
+reason quotes the offending token as written.
 
-- Numbers: a percent, money amount or plain number must equal a bundle value at the registry's
-  display precision. Quantities are narrowed to the options and metrics the sentence names, so a
-  number that belongs to another ad does not pass. A quantity match must not be below floor, and a
-  marginal one needs ``caveat_marginal`` in the same sentence. Numbers that are not quantities
-  (comparison probabilities and money, guarantee slots, feasibility counts, horizon amounts) pass
-  only when they match exactly; comparison probabilities are not accepted in a sentence that names
-  a metric, since there a percent is a rate.
+- Numbers (D29.1, D29.4, D29.5). Every number token is resolved to a value: digits with a currency
+  sign or code, a suffix (%, percent, per cent, pct, bps, basis points, k, m, bn, thousand,
+  million, billion, x), or a spelled-out number ("nine point nine percent"). A token that does not
+  resolve to a bundle value at the registry's rounding is rejected. A quantity number must match a
+  quantity whose option and metric the clause (or, failing that, the sentence) names. A quantity
+  match must not be below floor; a marginal one needs ``caveat_marginal`` in the same sentence.
+  Allowed without a quantity: comparison probabilities (as a percent or a probability at
+  ``probability_decimals``; not in a sentence naming a metric), comparison and recommendation
+  money, guarantee slot values, allocation shares, feasibility available/required, horizon
+  amounts, number of ads, days in the window, ISO dates inside the bundle window, and the
+  registry interval level written as "<level>% interval" or "<level>% range".
 - Not-knowable items: a sentence naming a below-floor quantity's option and metric must use the
   ``not_knowable`` phrase.
-- Comparatives: the options named must all sit in one bundle ``Comparison``; for better / worse /
-  best wording the winner must have the higher ``p_best``; the recommendations sharing that
-  comparison's economics must have a decision basis of marginal or estimable.
-- Causal verbs (``phrasing.yaml`` ``causal_lexicon``): plain verbs need every quantity about the
-  named options to be randomized (or holdout); "incremental" needs holdout (I11).
+- Comparatives and superlatives (D29.3, ``comparative_lexicon``): every one must name options that
+  all sit in one Comparison, agree with its ``p_best`` order, and have a decision basis of
+  marginal or estimable.
+- Causal words (D29.2, ``causal_lexicon``): single words match by stem across inflections, phrases
+  match as written, case-insensitive; an explicit negation earlier in the same clause passes.
+  Plain causal words need every quantity about the named options randomized (or holdout);
+  incremental words need holdout (I11).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from bayesian_marketing.claims import vocab as V
@@ -37,172 +43,427 @@ from bayesian_marketing.core import (
     Quantity,
     ReportBundle,
     inputs_hash,
+    registries,
     utcnow,
 )
 
-_NUM_RE = re.compile(
-    r"(?<![\w.])(?P<cur>[$€£]\s?)?(?P<num>\d(?:[\d,]*\d)?(?:\.\d+)?)(?P<suf>%|x)?(?![\w]|[.,]\d)"
+# --- tokenizing ------------------------------------------------------------------------------
+
+_SUFFIX = (
+    r"(?P<suf>\s?%|\s?(?:percent|per\s+cent|pct|bps|basis\s+points|thousand|million|billion)"
+    r"(?![\w])|(?:k|m|bn|x)(?![\w]))?"
 )
-_SENT_RE = re.compile(r"(?<=[.!?])\s+")
+_CODE = r"(?P<code>\s?(?:usd|eur|gbp|dollars?|euros?|pounds?)(?![\w]))?"
+_NUM_RE = re.compile(
+    r"(?<![\w.])(?P<cur>[$€£]\s?)?(?P<num>\d(?:[\d,]*\d)?(?:\.\d+)?)" + _SUFFIX + _CODE
+    + r"(?![\w]|[.,]\d)",
+    re.IGNORECASE,
+)  # fmt: skip
+_UNITS = {
+    w: i
+    for i, w in enumerate(
+        [
+            "zero",
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "eleven",
+            "twelve",
+            "thirteen",
+            "fourteen",
+            "fifteen",
+            "sixteen",
+            "seventeen",
+            "eighteen",
+            "nineteen",
+        ]
+    )
+}
+_TENS = {
+    w: 10 * (i + 2)
+    for i, w in enumerate(
+        ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    )
+}
+_SCALES = {"hundred": 100, "thousand": 1000, "million": 1_000_000, "billion": 1_000_000_000}
+_NUMWORD = "|".join(sorted([*_UNITS, *_TENS, "hundred"], key=len, reverse=True))
+_UNITWORD = "|".join(sorted(_UNITS, key=len, reverse=True))
+_SPELLED_RE = re.compile(
+    rf"(?<![\w-])(?P<cur>[$€£]\s?)?(?P<words>(?:{_NUMWORD})(?:(?:\s+|-)(?:and\s+)?(?:{_NUMWORD}))*"
+    rf"(?:\s+point(?:\s+(?:{_UNITWORD}))+)?)(?![\w-])" + _SUFFIX + _CODE + r"(?![\w])",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])")
+_RUN_RE = re.compile(r"(?<![\w-])run_\w+", re.IGNORECASE)
+_SENT_RE = re.compile(r"(?<=[.!?])\s+|(?<=[a-z%)\]][.!?])(?=[A-Z])|\n+")
+_CLAUSE_RE = re.compile(
+    r"\s*[;:]\s*|,\s+(?=(?:and|but|while|whereas|so|yet)\b)|\s+(?:and|while|whereas)\s+",
+    re.IGNORECASE,
+)
+_CAUSAL_CLAUSE_RE = re.compile(r"[,;:]|\s+but\s+", re.IGNORECASE)
+_NEGATION_RE = re.compile(
+    r"(?<![\w-])(?:not|no|never|nothing|none|cannot|neither|nor|without)(?![\w-])|n't(?![\w])",
+    re.IGNORECASE,
+)
 _IDLIKE_RE = re.compile(r"(?<![\w-])(?=[A-Za-z]\w*[_\d])[A-Za-z]\w*(?![\w-])")
-_STRONG_WIN = ("better", "best", "outperforms", "outperformed", "outperform", "beats", "beat")
-_STRONG_LOSE = ("worse", "worst", "underperforms", "underperformed", "underperform")
-_WEAK = ("more", "fewer", "less", "higher", "lower", "greater", "cheaper", "stronger", "weaker")
+_INTERVAL_AFTER_RE = re.compile(r"^\s*(?:credible\s+)?(?:interval|range)\b", re.IGNORECASE)
+_INFLECT = r"(?:e|es|ed|ing|s|en|d)?"
 _OK_DECISION = ("estimable", "marginal")
+
+# Direction of comparative_lexicon entries: +1 means the first named option is the stronger one.
+# Lexicon entries missing here still need a matching Comparison, with no direction check.
+_POLARITY = {
+    **dict.fromkeys(
+        [
+            "better",
+            "higher",
+            "stronger",
+            "more",
+            "cheaper",
+            "outperform",
+            "beat",
+            "best",
+            "highest",
+            "strongest",
+            "cheapest",
+            "winner",
+            "leader",
+        ],
+        1,
+    ),
+    **dict.fromkeys(["ahead of", "superior to", "wins against", "top performer", "the leader"], 1),
+    **dict.fromkeys(
+        [
+            "worse",
+            "lower",
+            "weaker",
+            "fewer",
+            "less",
+            "underperform",
+            "behind",
+            "worst",
+            "lowest",
+            "weakest",
+        ],
+        -1,
+    ),
+    **dict.fromkeys(["more expensive", "inferior to", "loses to", "bottom performer"], -1),
+}
+_SIZE_WORDS = frozenset({"higher", "lower", "more", "fewer", "less", "highest", "lowest"})
+_COST_METRICS = frozenset({"cpa", "cpc", "cpm"})
 
 
 def _word_re(w: str) -> re.Pattern[str]:
     return re.compile(r"(?<![\w-])" + re.escape(w.lower()) + r"(?![\w-])")
 
 
+def _lex_re(entry: str) -> re.Pattern[str]:
+    """A lexicon entry: phrases as written (any whitespace), single words by stem."""
+    words = entry.lower().split()
+    if len(words) > 1:
+        return re.compile(
+            r"(?<![\w-])" + r"\s+".join(map(re.escape, words)) + r"(?![\w-])", re.IGNORECASE
+        )
+    w = words[0]
+    base = w[:-1] if w.endswith("e") else w
+    return re.compile(r"(?<![\w-])" + re.escape(base) + _INFLECT + r"(?![\w-])", re.IGNORECASE)
+
+
+@dataclass
+class _Tok:
+    text: str
+    value: Decimal
+    kind: str  # pct (percent units) | money | plain | ratio
+    end: int
+
+
+def _spelled_value(words: str) -> Decimal | None:
+    parts = re.split(r"\s+point\s+", words.lower(), maxsplit=1)
+    total = current = 0
+    for w in re.split(r"[\s-]+", parts[0]):
+        if w == "and" or not w:
+            continue
+        if w in _UNITS:
+            current += _UNITS[w]
+        elif w in _TENS:
+            current += _TENS[w]
+        elif w == "hundred":
+            current = (current or 1) * 100
+        elif w in _SCALES:
+            total += (current or 1) * _SCALES[w]
+            current = 0
+        else:
+            return None
+    s = str(total + current)
+    if len(parts) > 1:
+        s += "." + "".join(str(_UNITS[w]) for w in parts[1].split())
+    return Decimal(s)
+
+
+def _resolve(
+    num: Decimal, suf: str | None, cur: str | None, code: str | None
+) -> tuple[str, Decimal]:
+    s = re.sub(r"\s+", " ", (suf or "").strip().lower())
+    money = bool(cur or code)
+    if s in ("%", "percent", "per cent", "pct"):
+        return "pct", num
+    if s in ("bps", "basis points"):
+        return "pct", num / 100
+    if s == "x":
+        return "ratio", num
+    mult = {"k": 1000, "thousand": 1000, "m": 10**6, "million": 10**6, "bn": 10**9,
+            "billion": 10**9}.get(s, 1)  # fmt: skip
+    return ("money" if money else "plain"), num * mult
+
+
+def _tokens(text: str) -> list[_Tok]:
+    out: list[_Tok] = []
+    for m in _NUM_RE.finditer(text):
+        try:
+            num = Decimal(V.norm_number(m.group("num")))
+        except InvalidOperation:
+            num = Decimal("NaN")
+        kind, val = _resolve(num, m.group("suf"), m.group("cur"), m.group("code"))
+        out.append(_Tok(m.group(0).strip(), val, kind, m.end()))
+    for m in _SPELLED_RE.finditer(text):
+        words = m.group("words")
+        if words.lower() == "one" and not (m.group("suf") or m.group("cur") or m.group("code")):
+            continue  # "one of the ads": a pronoun far more often than a count
+        num = _spelled_value(words)
+        if num is None:
+            continue
+        kind, val = _resolve(num, m.group("suf"), m.group("cur"), m.group("code"))
+        out.append(_Tok(m.group(0).strip(), val, kind, m.end()))
+    return out
+
+
+def _dec(s: str) -> Decimal:
+    return Decimal(V.norm_number(s).rstrip("%"))
+
+
+# --- bundle index ----------------------------------------------------------------------------
+
+
+class _Exact(set):
+    """Decimals compared as written: equal value and equal precision ("2%" is not "2.0%")."""
+
+    def add(self, d: Any) -> None:
+        super().add(str(d))
+
+    def __contains__(self, d: object) -> bool:
+        return super().__contains__(str(d))
+
+
 @dataclass
 class _Bundle:
     b: ReportBundle
-    vocab: set[str]
-    plain_ok: set[str] = field(default_factory=set)
-    money_ok: set[str] = field(default_factory=set)
-    pct_ok: set[str] = field(default_factory=set)  # non-rate percents (slots, allocations)
-    prob_pct: set[str] = field(default_factory=set)  # comparison probabilities as percents
+    vocab: dict[str, str]  # lower-case -> as in the bundle
+    displays: dict[str, _Exact] = field(default_factory=dict)  # quantity_id -> values
+    plain_ok: _Exact = field(default_factory=_Exact)
+    money_ok: _Exact = field(default_factory=_Exact)
+    pct_ok: _Exact = field(default_factory=_Exact)
+    probs: list[float] = field(default_factory=list)
+    window: tuple[date, date] | None = None
+    level_pct: Decimal | None = None
+
+
+def _accept_slot(ix: _Bundle, text: str) -> None:
+    for t in _tokens(text):
+        {"pct": ix.pct_ok, "money": ix.money_ok}.get(t.kind, ix.plain_ok).add(t.value)
 
 
 def _index(bundle: ReportBundle) -> _Bundle:
-    vocab: set[str] = set()
+    vocab: dict[str, str] = {}
+    ads: set[str] = set()
     for q in bundle.quantities:
-        vocab |= V.entities_of(q)
+        for e in V.entities_of(q):
+            vocab[e.lower()] = e
+        if "ad" in q.scope.ids:
+            ads.add(q.scope.ids["ad"])
     for c in bundle.comparisons:
-        vocab |= set(c.options)
+        for o in c.options:
+            vocab[o.lower()] = o
     ix = _Bundle(bundle, vocab)
+    for q in bundle.quantities:
+        shown = ix.displays[q.quantity_id] = _Exact()
+        for v in q.estimate.summary.values():
+            if V.finite(v):
+                shown.add(_dec(V.fmt_value(q, v)))
+        f = q.feasibility
+        for x in (f.available, f.required):
+            if x is not None and V.finite(x):
+                ix.plain_ok.add(_dec(V.fmt_count(x)))
     for c in bundle.comparisons:
-        for p in (*c.p_best.values(), *c.p_exceeds_break_even.values()):
-            ix.prob_pct.add(V.fmt_percent(p))
-            ix.plain_ok.add(V.fmt_probability(p))
+        ix.probs += [*c.p_best.values(), *c.p_exceeds_break_even.values()]
         for m in (*c.expected_value.values(), *c.expected_loss.values()):
-            ix.money_ok.add(V.norm_number(V.fmt_amount(abs(m.amount))))
-        ix.plain_ok.add(V.norm_number(V.fmt_count(float(c.objective.horizon.amount))))
+            ix.money_ok.add(_dec(V.fmt_amount(abs(m.amount))))
+        ix.plain_ok.add(_dec(V.fmt_count(float(c.objective.horizon.amount))))
+        ads |= set(c.options)
+    for p in ix.probs:
+        ix.plain_ok.add(Decimal(V.fmt_probability(p)))
     for r in bundle.recommendations:
         for m in (r.expected_benefit, r.expected_loss):
             if m is not None:
-                ix.money_ok.add(V.norm_number(V.fmt_amount(abs(m.amount))))
-        ix.plain_ok.add(V.norm_number(V.fmt_count(float(r.horizon.amount))))
+                ix.money_ok.add(_dec(V.fmt_amount(abs(m.amount))))
+        ix.plain_ok.add(_dec(V.fmt_count(float(r.horizon.amount))))
         for slot in r.guarantee.slots.values():
-            for m in _NUM_RE.finditer(slot):
-                _accept_written(ix, m)
+            _accept_slot(ix, slot)
         alloc = r.params.get("allocation")
         if isinstance(alloc, dict):
             for share in alloc.values():
                 if isinstance(share, int | float):
-                    ix.pct_ok.add(V.fmt_percent(share))
-    for q in bundle.quantities:
-        f = q.feasibility
-        for x in (f.available, f.required):
-            if x is not None and V.finite(x):
-                ix.plain_ok.add(V.norm_number(V.fmt_count(x)))
+                    ix.pct_ok.add(_dec(V.fmt_percent(share)))
+    if bundle.quantities:
+        start = min(q.scope.window[0] for q in bundle.quantities)
+        end = max(q.scope.window[1] for q in bundle.quantities)
+        ix.window = (start, end)
+        ix.plain_ok.add(Decimal((end - start).days + 1))
+    if ads:
+        ix.plain_ok.add(Decimal(len(ads)))
+    level = registries.resolve("bounds/estimability/posterior_width@v1")["level"]
+    ix.level_pct = Decimal(str(level)) * 100
     return ix
 
 
-def _accept_written(ix: _Bundle, m: re.Match[str]) -> None:
-    num = V.norm_number(m.group("num"))
-    if m.group("suf") == "%":
-        ix.pct_ok.add(num + "%")
-    elif m.group("cur"):
-        ix.money_ok.add(num)
-    else:
-        ix.plain_ok.add(num)
+# --- sentences -------------------------------------------------------------------------------
 
 
 @dataclass
-class _Sentence:
+class _Ctx:
     text: str
     low: str
     entities: list[str]  # bundle option names, in order of appearance
     metrics: set[str]
 
 
-def _sentence(text: str, ix: _Bundle) -> _Sentence:
+def _ctx(text: str, ix: _Bundle) -> _Ctx:
     low = text.lower()
     found: list[tuple[int, str]] = []
-    for e in ix.vocab:
-        m = _word_re(e).search(low)
+    for key, e in ix.vocab.items():
+        m = _word_re(key).search(low)
         if m:
             found.append((m.start(), e))
     metrics = set()
     for name, aliases in V.METRIC_ALIASES.items():
         if any(_word_re(a).search(low) for a in aliases):
             metrics.add(name)
-    # "conversion rate" also contains no other alias; "contribution per click" contains
-    # "contribution": keep the longer reading only.
     if "contribution_per_click" in metrics:
         metrics.discard("contribution")
-    return _Sentence(text, low, [e for _, e in sorted(found)], metrics)
+    return _Ctx(text, low, [e for _, e in sorted(found)], metrics)
 
 
-def _relevant(s: _Sentence, quantities: list[Quantity], *, by_metric: bool) -> list[Quantity]:
-    out = quantities
-    if s.entities:
-        named = set(s.entities)
-        out = [q for q in out if V.entities_of(q) & named]
-    if by_metric and s.metrics:
-        out = [q for q in out if q.name in s.metrics]
-    return out
+def _about(entities: list[str], metrics: set[str], quantities: list[Quantity]) -> list[Quantity]:
+    """Quantities whose option and metric are both named (D29.4: no fallback)."""
+    named = set(entities)
+    return [q for q in quantities if V.entities_of(q) & named and q.name in metrics]
 
 
-def _displays(q: Quantity) -> set[str]:
-    return {V.norm_number(V.fmt_value(q, v)) for v in q.estimate.summary.values() if V.finite(v)}
+def _prob_match(v: Decimal, ix: _Bundle) -> bool:
+    for p in ix.probs:
+        if v == _dec(V.fmt_percent(p)) or v / 100 == Decimal(V.fmt_probability(p)):
+            return True
+    return False
 
 
-def _check_numbers(s: _Sentence, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
-    reasons: list[str] = []
-    caveat = phr["caveat_marginal"].lower() in s.low
-    rel = _relevant(s, ix.b.quantities, by_metric=True)
-    for m in _NUM_RE.finditer(s.text):
-        tok = m.group(0).strip()
-        num = V.norm_number(m.group("num"))
-        suf, cur = m.group("suf"), m.group("cur")
-        if suf == "%":
-            key, kinds = num + "%", V.RATE_NAMES
-        elif cur:
-            key, kinds = num, V.MONEY_NAMES
-        else:
-            key, kinds = num, V.MONEY_NAMES | V.RATIO_NAMES
-        hits = [q for q in rel if q.name in kinds and key in _displays(q)]
-        if hits:
-            statuses = {q.feasibility.status for q in hits}
-            if "estimable" in statuses:
-                continue
-            if "marginal" in statuses:
-                if not caveat:
-                    ids = ", ".join(q.quantity_id for q in hits)
-                    reasons.append(
-                        f"{tok}: marginal quantity ({ids}) quoted without the caveat "
-                        f"{phr['caveat_marginal']!r} in the same sentence"
-                    )
-                continue
-            ids = ", ".join(q.quantity_id for q in hits)
-            reasons.append(
-                f"{tok}: below-floor quantity ({ids}) stated as a finding; "
-                f"say {phr['not_knowable']!r}"
-            )
-            continue
-        if suf == "%":
-            ok = key in ix.pct_ok or (not s.metrics and key in ix.prob_pct)
-        elif cur:
-            ok = key in ix.money_ok
-        else:
-            ok = key in ix.plain_ok or key in ix.money_ok
-        if not ok:
-            where = f" for {', '.join(s.entities)}" if s.entities else ""
-            reasons.append(
-                f"{tok}: number matches no bundle quantity{where} at the registry's rounding"
-            )
+def _check_dates_and_runs(s: _Ctx, ix: _Bundle) -> list[str]:
+    reasons = []
+    for m in _DATE_RE.finditer(s.text):
+        try:
+            d = date.fromisoformat(m.group(0))
+        except ValueError:
+            d = None
+        if d is None or ix.window is None or not ix.window[0] <= d <= ix.window[1]:
+            reasons.append(f"{m.group(0)}: date is outside the bundle's data window")
+    for m in _RUN_RE.finditer(s.text):
+        if m.group(0).lower() != ix.b.run_id.lower():
+            reasons.append(f"{m.group(0)}: not this bundle's run id ({ix.b.run_id})")
     return reasons
 
 
-def _check_not_knowable(s: _Sentence, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
+def _check_numbers(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    caveat = phr["caveat_marginal"].lower() in s.low
+    masked = _RUN_RE.sub(" ", _DATE_RE.sub(" ", s.text))
+    for clause in _CLAUSE_RE.split(masked):
+        if not clause or not clause.strip():
+            continue
+        c = _ctx(clause, ix)
+        entities = c.entities or s.entities
+        metrics = c.metrics or s.metrics
+        rel = _about(entities, metrics, ix.b.quantities)
+        for t in _tokens(clause):
+            reasons += _check_token(t, clause, rel, metrics, entities, caveat, ix, phr)
+    return reasons
+
+
+def _check_token(
+    t: _Tok,
+    clause: str,
+    rel: list[Quantity],
+    metrics: set[str],
+    entities: list[str],
+    caveat: bool,
+    ix: _Bundle,
+    phr: dict[str, Any],
+) -> list[str]:
+    kinds = {
+        "pct": V.RATE_NAMES,
+        "money": V.MONEY_NAMES,
+        "plain": V.MONEY_NAMES | V.RATIO_NAMES,
+        "ratio": V.RATIO_NAMES,
+    }[t.kind]
+    hits = [q for q in rel if q.name in kinds and t.value in ix.displays[q.quantity_id]]
+    if hits:
+        ids = ", ".join(q.quantity_id for q in hits)
+        statuses = {q.feasibility.status for q in hits}
+        if "estimable" in statuses:
+            return []
+        if "marginal" in statuses:
+            if caveat:
+                return []
+            return [
+                f"{t.text}: marginal quantity ({ids}) quoted without the caveat "
+                f"{phr['caveat_marginal']!r} in the same sentence"
+            ]
+        return [
+            f"{t.text}: below-floor quantity ({ids}) stated as a finding; "
+            f"say {phr['not_knowable']!r}"
+        ]
+    if t.kind == "pct":
+        after = clause[t.end :]
+        ok = (not metrics and (t.value in ix.pct_ok or _prob_match(t.value, ix))) or (
+            t.value == ix.level_pct and bool(_INTERVAL_AFTER_RE.match(after))
+        )
+    elif t.kind == "money":
+        ok = t.value in ix.money_ok
+    elif t.kind == "plain":
+        ok = t.value in ix.plain_ok or t.value in ix.money_ok
+    else:
+        ok = False
+    if ok:
+        return []
+    named = []
+    if entities:
+        named.append(", ".join(entities))
+    if metrics:
+        named.append(", ".join(V.METRIC_LABELS[m] for m in sorted(metrics)))
+    where = f" for {' / '.join(named)}" if named else ""
+    return [f"{t.text}: number matches no bundle value{where} at the registry's rounding"]
+
+
+def _check_not_knowable(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
     if not s.entities or not s.metrics or phr["not_knowable"].lower() in s.low:
         return []
     nk_ids = set(ix.b.knowability.not_knowable)
     reasons = []
-    for q in _relevant(s, ix.b.quantities, by_metric=True):
+    for q in _about(s.entities, s.metrics, ix.b.quantities):
         if q.feasibility.status == "below_floor" or q.quantity_id in nk_ids:
             ent = ", ".join(sorted(V.entities_of(q) & set(s.entities)))
             reasons.append(
@@ -212,102 +473,125 @@ def _check_not_knowable(s: _Sentence, ix: _Bundle, phr: dict[str, Any]) -> list[
     return reasons
 
 
-def _comparative_word(low: str) -> tuple[str, str] | None:
-    for w in _STRONG_WIN:
-        if _word_re(w).search(low):
-            return w, "win"
-    for w in _STRONG_LOSE:
-        if _word_re(w).search(low):
-            return w, "lose"
-    if _word_re("than").search(low):
-        for w in _WEAK:
-            if _word_re(w).search(low):
-                return w, "weak"
-    return None
+def _lex_hits(low: str, entries: list[str]) -> list[tuple[int, int, str]]:
+    hits = []
+    for e in entries:
+        for m in _lex_re(e).finditer(low):
+            hits.append((m.start(), m.end(), e))
+    # drop a hit inside a longer one ("more" inside "more expensive")
+    return [
+        h
+        for h in hits
+        if not any(o != h and o[0] <= h[0] and h[1] <= o[1] and o[1] - o[0] > h[1] - h[0]
+                   for o in hits)
+    ]  # fmt: skip
 
 
-def _check_comparative(s: _Sentence, ix: _Bundle) -> list[str]:
-    hit = _comparative_word(s.low)
-    if hit is None:
+def _check_comparatives(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
+    lex = phr["comparative_lexicon"]
+    hits = [(h, False) for h in _lex_hits(s.low, lex["comparative"])]
+    hits += [(h, True) for h in _lex_hits(s.low, lex["superlative"])]
+    if not hits:
         return []
-    word, direction = hit
-    names = list(s.entities)
-    unknown = [t for t in _IDLIKE_RE.findall(s.text) if t not in ix.vocab]
-    if unknown:
-        return [
-            f"{', '.join(unknown)}: comparative {word!r} names an option with no comparison "
-            "in the bundle"
-        ]
-    if not names:
-        return [f"{word}: comparative names no option, so it matches no comparison"]
-    comps: list[Comparison] = [c for c in ix.b.comparisons if set(names) <= set(c.options)]
-    if not comps:
-        covered = set().union(*(set(c.options) for c in ix.b.comparisons))
-        missing = [n for n in names if n not in covered] or names
-        return [
-            f"{', '.join(missing)}: comparative {word!r} between {', '.join(names)} matches "
-            "no comparison in the bundle"
-        ]
     reasons: list[str] = []
-    comp = comps[0]
-    if direction in ("win", "lose"):
+    names = list(s.entities)
+    unknown = [t for t in _IDLIKE_RE.findall(s.text) if t.lower() not in ix.vocab]
+    unknown = [t for t in unknown if not _RUN_RE.fullmatch(t)]
+    cost_metric = bool(s.metrics & _COST_METRICS)
+    decision_checked = False
+    for (start, end, entry), superlative in sorted(hits):
+        word = s.text[start:end]
+        if unknown:
+            reasons.append(
+                f"{', '.join(unknown)}: {word!r} names an option with no comparison in the bundle"
+            )
+            continue
+        if not names:
+            reasons.append(f"{word}: comparative names no option, so it matches no comparison")
+            continue
+        comps: list[Comparison] = [c for c in ix.b.comparisons if set(names) <= set(c.options)]
+        if not comps:
+            covered = set().union(*(set(c.options) for c in ix.b.comparisons))
+            missing = [n for n in names if n not in covered] or names
+            reasons.append(
+                f"{', '.join(missing)}: {word!r} about {', '.join(names)} matches no comparison "
+                "in the bundle"
+            )
+            continue
+        comp = comps[0]
+        polarity = _POLARITY.get(entry.lower())
+        if polarity is not None and cost_metric and entry.lower() in _SIZE_WORDS:
+            polarity = -polarity  # a lower cost per order is the stronger option
         first = names[0]
-        others = names[1:] or [o for o in comp.options if o != first]
-        for o in others:
-            a, b = comp.p_best.get(first, 0.0), comp.p_best.get(o, 0.0)
-            if (direction == "win" and not a > b) or (direction == "lose" and not a < b):
+        if superlative or len(names) == 1:
+            others = [o for o in comp.options if o != first]
+        else:
+            others = names[1:]
+        if polarity is not None:
+            for o in others:
+                a, b = comp.p_best.get(first, 0.0), comp.p_best.get(o, 0.0)
+                if (polarity > 0 and not a > b) or (polarity < 0 and not a < b):
+                    reasons.append(
+                        f"{first}: {word!r} against {o} disagrees with the comparison "
+                        f"(p_best {first} {V.fmt_probability(a)}, {o} {V.fmt_probability(b)})"
+                    )
+        if not decision_checked:
+            decision_checked = True
+            recs = [r for r in ix.b.recommendations if r.economics_id == comp.economics_id]
+            statuses = [r.decision_feasibility.status for r in recs]
+            if not statuses or any(st not in _OK_DECISION for st in statuses):
+                basis = ", ".join(statuses) or "none"
                 reasons.append(
-                    f"{first}: comparative {word!r} against {o} is not supported by the "
-                    f"comparison (p_best {first} {V.fmt_probability(a)}, "
-                    f"{o} {V.fmt_probability(b)})"
+                    f"{', '.join(names)}: {word!r} needs a decision basis of marginal or "
+                    f"estimable; the bundle's is {basis}"
                 )
-    recs = [r for r in ix.b.recommendations if r.economics_id == comp.economics_id]
-    statuses = [r.decision_feasibility.status for r in recs]
-    if not statuses or any(st not in _OK_DECISION for st in statuses):
-        basis = ", ".join(statuses) or "none"
-        reasons.append(
-            f"{', '.join(names)}: comparative {word!r} needs a decision basis of marginal or "
-            f"estimable; the bundle's is {basis}"
-        )
     return reasons
 
 
-def _check_causal(s: _Sentence, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
+def _negated(text: str, pos: int) -> bool:
+    """An explicit negation earlier in the same clause as the word at ``pos``."""
+    starts = [m.end() for m in _CAUSAL_CLAUSE_RE.finditer(text[:pos])]
+    clause = text[(starts[-1] if starts else 0) : pos]
+    return bool(_NEGATION_RE.search(clause))
+
+
+def _check_causal(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
     lex = phr["causal_lexicon"]
     reasons: list[str] = []
-    rel = _relevant(s, ix.b.quantities, by_metric=False)
-    designs = sorted({q.design for q in rel}) or ["none in the bundle"]
-    for w in lex["plain"]:
-        m = _word_re(w).search(s.low)
-        if m and (not rel or any(q.design not in ("randomized", "holdout") for q in rel)):
-            tok = s.text[m.start() : m.end()]
+    named = set(s.entities)
+    rel = [q for q in ix.b.quantities if V.entities_of(q) & named] if named else ix.b.quantities
+    designs = ", ".join(sorted({q.design for q in rel})) or "none in the bundle"
+    for entries, allowed, need in (
+        (lex["plain"], ("randomized", "holdout"), "a randomized design"),
+        (lex["incremental"], ("holdout",), "a holdout design"),
+    ):
+        if rel and all(q.design in allowed for q in rel):
+            continue
+        for start, end, _ in sorted(_lex_hits(s.low, entries)):
+            if _negated(s.text, start):
+                continue
+            tok = s.text[start:end]
             reasons.append(
-                f"{tok}: causal verb needs a randomized design; the quantities it is about are "
-                f"{', '.join(designs)}"
-            )
-    for w in lex["incremental"]:
-        m = _word_re(w).search(s.low)
-        if m and (not rel or any(q.design != "holdout" for q in rel)):
-            tok = s.text[m.start() : m.end()]
-            reasons.append(
-                f"{tok}: 'incremental' needs a holdout design; the quantities it is about are "
-                f"{', '.join(designs)}"
+                f"{tok}: causal wording needs {need}; the quantities it is about are {designs}"
             )
     return reasons
+
+
+def _sentences(text: str) -> list[str]:
+    return [p for p in _SENT_RE.split(text.strip()) if p and p.strip()]
 
 
 def check_narrative(block: NarrativeBlock, bundle: ReportBundle) -> GateResult:
-    """G5 (§10 C1). Pure function of the block, the bundle and the phrasing registry."""
+    """G5 (§10 C1, D29). Pure function of the block, the bundle and the registries."""
     phr = V.phrasing()
     ix = _index(bundle)
     reasons: list[str] = []
-    for raw in _SENT_RE.split(block.text.strip()):
-        if not raw:
-            continue
-        s = _sentence(raw, ix)
+    for raw in _sentences(block.text):
+        s = _ctx(raw, ix)
+        reasons += _check_dates_and_runs(s, ix)
         reasons += _check_numbers(s, ix, phr)
         reasons += _check_not_knowable(s, ix, phr)
-        reasons += _check_comparative(s, ix)
+        reasons += _check_comparatives(s, ix, phr)
         reasons += _check_causal(s, ix, phr)
     return GateResult(
         gate="G5",
