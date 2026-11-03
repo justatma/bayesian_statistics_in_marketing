@@ -8,7 +8,10 @@ in ``XXX`` (ISO 4217 "no currency"); ``assess`` restates them in the economics' 
 EVSI follows the preposterior method (Manuscript ch. 6, §6.3 C1) for signal-type designs: on each
 joint draw an arm signals positive with probability ``sensitivity`` if its payoff is > 0, else
 ``false_positive_rate``; arms signal independently given the draw. EVSI is
-Σ_s P(s) max_j E[V_j | s] - max_j E[V_j].
+Σ_s P(s) max_j E[V_j | s] - max_j E[V_j]. This signal model is an approximation: it ties
+what a test reveals to the sign of each arm's payoff only, not to the test's volume.
+DesignAssessment has no notices field, so the disclosure lives in ``SIGNAL_MODEL_NOTICE`` for the
+caller to attach (manifest open question: DesignAssessment.notices).
 """
 
 from __future__ import annotations
@@ -24,16 +27,36 @@ from bayesian_marketing.core import (
     DecisionProblem,
     DesignAssessment,
     FunnelState,
+    GateFailure,
+    GateResult,
     Money,
     MoneyInterval,
     TestDesign,
     inputs_hash,
     registries,
+    utcnow,
+)
+from bayesian_marketing.derived_metrics.dist import (
+    PER_MILLE,
+    QuadratureError,
+    decode_currency,
+    exact_max_moments,
+    frozen,
+    read_draws,
 )
 from bayesian_marketing.derived_metrics.dist import draws_of as _draws_of
-from bayesian_marketing.derived_metrics.dist import exact_max_moments, frozen, read_draws
 
 NO_CURRENCY = "XXX"
+MAX_SIGNAL_ARMS = 10
+"""2^arms signal outcomes are enumerated; beyond this EVSI refuses. Registry key requested:
+decision_defaults.yaml evsi_max_signal_arms: 10."""
+COST_INTERVAL_LEVEL = 0.90
+"""Central level of the test-cost interval (MoneyInterval.level default). Registry key requested:
+decision_defaults.yaml cost_interval_level: 0.90."""
+SIGNAL_MODEL_NOTICE = (
+    "EVSI uses a signal-model approximation: sensitivity and false-positive rate on the sign of "
+    "each arm's payoff, independent of test volume"
+)
 
 
 def _money(x: float, cur: str = NO_CURRENCY) -> Money:
@@ -72,9 +95,11 @@ def evpi(p: DecisionProblem) -> Money:
     specs = [p.payoffs[o] for o in p.options]
     if all(s.kind == "analytic" for s in specs):
         tol = float(registries.resolve("decision_defaults/quadrature_abs_tol@v1"))
-        dists = [frozen(s) for s in specs]
-        _, e_max = exact_max_moments(dists, tol)
-        return _money(max(0.0, e_max - max(float(d.mean()) for d in dists)))
+        try:
+            _, loss = exact_max_moments([frozen(s) for s in specs], tol)
+            return _money(min(loss))  # E[max] - max_j E[V_j] is the smallest expected loss
+        except QuadratureError:
+            pass  # falls back to draws below
     x = _payoff_draws(p)
     return _money(max(0.0, float(x.max(axis=1).mean() - x.mean(axis=0).max())))
 
@@ -85,6 +110,10 @@ def evsi(p: DecisionProblem, d: TestDesign) -> Money:
     if d.sensitivity is None or d.false_positive_rate is None:
         raise ValueError(
             "EVSI needs a signal model: TestDesign.sensitivity and false_positive_rate"
+        )
+    if len(d.arms) > MAX_SIGNAL_ARMS:
+        raise ValueError(
+            f"EVSI enumerates 2^arms signal outcomes; {len(d.arms)} arms exceed {MAX_SIGNAL_ARMS}"
         )
     unknown = [a for a in d.arms if a not in p.options]
     if unknown:
@@ -122,9 +151,9 @@ def _cost_draws(d: TestDesign, state: FunnelState) -> np.ndarray:
     for arm, share in shares.items():
         cpm = read_draws(state.posterior, f"{arm}.cpm")
         if unit == "impressions":
-            per_unit = cpm / 1000.0
+            per_unit = cpm / PER_MILLE
         else:
-            per_unit = cpm / (1000.0 * read_draws(state.posterior, f"{arm}.ctr"))
+            per_unit = cpm / (PER_MILLE * read_draws(state.posterior, f"{arm}.ctr"))
         total = total + share * vol * per_unit
     return np.asarray(total, dtype=float)
 
@@ -133,19 +162,37 @@ def assess(
     p: DecisionProblem, d: TestDesign, econ: ClientEconomics, state: FunnelState
 ) -> DesignAssessment:
     cur = econ.currency
+    code = (state.posterior.params or {}).get("currency.code")
+    if code is not None and decode_currency(code) != cur:
+        raise GateFailure(
+            GateResult(
+                gate="G9",
+                passed=False,
+                blocking=True,
+                reasons=[f"currency mismatch: data in {decode_currency(code)}, economics in {cur}"],
+                inputs_hash=inputs_hash({"state": state.state_id, "econ": econ.economics_id}),
+                checked_at=utcnow(),
+            )
+        )
     v_pi = float(evpi(p).amount)
     v_si = float(evsi(p, d).amount)
     cost = _cost_draws(d, state)
-    lo, mid, hi = (float(v) for v in np.quantile(cost, [0.05, 0.5, 0.95]))
+    tail = (1.0 - COST_INTERVAL_LEVEL) / 2.0
+    lo, mid, hi = (float(v) for v in np.quantile(cost, [tail, 0.5, 1.0 - tail]))
     net = v_si - mid
     label = "holdout" if d.holdout else "randomized" if d.randomized else "observational"
     # §6.3 C3: no redesign is searched, because the signal model has no link from volume to
     # sensitivity; a cheaper volume would carry the same EVSI and the search would be degenerate.
-    verdict = "buy" if net >= 0 else "do_not_buy"
+    verdict = "buy" if net > 0 else "do_not_buy"  # a test that only breaks even is not bought
     return DesignAssessment(
         evpi=_money(v_pi, cur),
         evsi=_money(v_si, cur),
-        cost=MoneyInterval(low=_money(lo, cur), mid=_money(mid, cur), high=_money(hi, cur)),
+        cost=MoneyInterval(
+            low=_money(lo, cur),
+            mid=_money(mid, cur),
+            high=_money(hi, cur),
+            level=COST_INTERVAL_LEVEL,
+        ),
         net_value=_money(net, cur),
         verdict=verdict,
         redesign=None,

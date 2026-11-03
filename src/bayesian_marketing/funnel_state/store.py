@@ -1,7 +1,9 @@
 """§5.4 save and load. States are immutable.
 
 A state is one JSON file ``<BAYES_DATA_DIR>/funnel_states/<state_id>.json``. Saving the same state
-again is a no-op; saving a different state under an existing id raises ``StateExistsError``.
+again is a no-op. A refit of the same inputs has the same state_id and differs only in
+``created_at``; that counts as the same state and the first stored copy is kept. Saving a
+different state under an existing id raises ``StateExistsError``.
 A quarantined state still loads (for audit); ``derived_metrics`` refuses it.
 """
 
@@ -34,25 +36,30 @@ def _path(state_id: str) -> Path:
     return states_dir() / f"{state_id}.json"
 
 
+def _same(a: FunnelState, b: FunnelState) -> bool:
+    return a.model_dump(exclude={"created_at"}) == b.model_dump(exclude={"created_at"})
+
+
+def _refuse(state_id: str) -> StateExistsError:
+    return StateExistsError(f"state {state_id} exists and states are immutable")
+
+
 def save(state: FunnelState) -> None:
     path = _path(state.state_id)
     if path.exists():
-        if load(state.state_id) == state:
+        if _same(load(state.state_id), state):
             return
-        raise StateExistsError(f"state {state.state_id} exists and states are immutable")
+        raise _refuse(state.state_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
+    tmp = path.with_suffix(f".json.{os.getpid()}.tmp")
     tmp.write_text(state.model_dump_json())
     try:
         os.link(tmp, path)  # fails if another writer got there first
     except FileExistsError:
+        if not _same(load(state.state_id), state):
+            raise _refuse(state.state_id) from None
+    finally:
         tmp.unlink(missing_ok=True)
-        if load(state.state_id) != state:
-            raise StateExistsError(
-                f"state {state.state_id} exists and states are immutable"
-            ) from None
-        return
-    tmp.unlink(missing_ok=True)
 
 
 def load(state_id: str) -> FunnelState:

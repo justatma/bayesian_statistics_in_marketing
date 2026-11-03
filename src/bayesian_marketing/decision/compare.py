@@ -5,6 +5,10 @@ click, contribution per click per click. Expected values and losses are in the o
 unit (clicks, orders, or currency for contribution) and carried as Money in the economics'
 currency, because Comparison types them as Money.
 
+Exact integration runs for fewer than ``min_ads_for_coupling`` independent analytic options. If
+quadrature misses its tolerance (registry ``quadrature_abs_tol``) the comparison falls back to joint
+draws, and ``method="joint_draws"`` with ``mc_standard_error`` records it.
+
 ``p_exceeds_break_even`` is P(contribution per click > 0), i.e. P(CVR > CPC / contribution per
 order) (contract assumption 14). CTR and CVR alone carry no cost, so the dict is empty for them.
 """
@@ -28,7 +32,20 @@ from bayesian_marketing.core import (
     registries,
     utcnow,
 )
-from bayesian_marketing.derived_metrics.dist import draws_of, exact_max_moments, frozen
+from bayesian_marketing.derived_metrics.dist import (
+    QuadratureError,
+    draws_of,
+    exact_max_moments,
+    frozen,
+)
+
+VALUE_QUANTILE = 0.05
+"""§8.2 C3: value_q05 is the 5th percentile of value at the horizon. Registry key requested:
+decision_defaults.yaml value_quantile: 0.05."""
+
+LOSS_SE_PREFIX = "expected_loss:"
+"""mc_standard_error carries p_best's SE under each option name and the expected loss's SE (at
+the horizon, in the value unit) under ``"expected_loss:<option>"``; Comparison has one dict."""
 
 # quantity name -> (objective target, horizon unit)
 SUPPORTED: dict[str, tuple[str, str]] = {
@@ -99,16 +116,25 @@ def compare(options: list[Quantity], objective: Objective, econ: ClientEconomics
     h = float(objective.horizon.amount)
     cur = econ.currency
     be = _break_even(name)
-    exact = all(q.estimate.kind == "analytic" and q.provenance.route != "nuts" for q in options)
+    max_exact = int(registries.resolve("bounds/coupling/min_ads_for_coupling@v1")) - 1
+    exact = len(options) <= max_exact and all(
+        q.estimate.kind == "analytic" and q.provenance.route != "nuts" for q in options
+    )
 
     p_exceeds: dict[str, float] = {}
     mc_se: dict[str, float] | None = None
+    result = None
     if exact:
         tol = float(registries.resolve("decision_defaults/quadrature_abs_tol@v1"))
         dists = [frozen(q.estimate) for q in options]
-        p_best_l, e_max = exact_max_moments(dists, tol)
+        try:
+            result = exact_max_moments(dists, tol)
+        except QuadratureError:
+            result = None  # falls back to joint draws; method and mc_standard_error say so
+    if result is not None:
+        p_best_l, loss = result
         means = [float(d.mean()) for d in dists]
-        q05 = [float(d.ppf(0.05)) for d in dists]
+        q05 = [float(d.ppf(VALUE_QUANTILE)) for d in dists]
         if be is not None:
             op, thr = be
             for n, d in zip(names, dists, strict=True):
@@ -119,16 +145,20 @@ def compare(options: list[Quantity], objective: Objective, econ: ClientEconomics
         n_rows = x.shape[0]
         best = np.argmax(x, axis=1)
         p_best_l = [float(np.mean(best == j)) for j in range(len(options))]
-        e_max = float(np.mean(np.max(x, axis=1)))
+        regret = np.max(x, axis=1)[:, None] - x
+        loss = [float(v) for v in regret.mean(axis=0)]
         means = [float(v) for v in x.mean(axis=0)]
-        q05 = [float(v) for v in np.quantile(x, 0.05, axis=0)]
+        q05 = [float(v) for v in np.quantile(x, VALUE_QUANTILE, axis=0)]
         if be is not None:
             op, thr = be
             for j, n in enumerate(names):
                 p_exceeds[n] = float(np.mean(x[:, j] > thr if op == ">" else x[:, j] < thr))
-        mc_se = {
-            n: float(np.sqrt(p * (1 - p) / n_rows)) for n, p in zip(names, p_best_l, strict=True)
-        }
+        sd_loss = regret.std(axis=0, ddof=1) if n_rows > 1 else np.zeros(len(options))
+        mc_se = {}
+        for j, n in enumerate(names):
+            p = p_best_l[j]
+            mc_se[n] = float(np.sqrt(p * (1 - p) / n_rows))
+            mc_se[f"{LOSS_SE_PREFIX}{n}"] = float(h * sd_loss[j] / np.sqrt(n_rows))
         method = "joint_draws"
 
     return Comparison(
@@ -137,7 +167,7 @@ def compare(options: list[Quantity], objective: Objective, econ: ClientEconomics
         economics_id=econ.economics_id,
         p_best=dict(zip(names, p_best_l, strict=True)),
         expected_value={n: _money(h * m, cur) for n, m in zip(names, means, strict=True)},
-        expected_loss={n: _money(h * (e_max - m), cur) for n, m in zip(names, means, strict=True)},
+        expected_loss={n: _money(h * v, cur) for n, v in zip(names, loss, strict=True)},
         p_exceeds_break_even=p_exceeds,
         method=method,
         mc_standard_error=mc_se,
