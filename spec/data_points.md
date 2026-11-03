@@ -1,113 +1,140 @@
 # ENG-BAYES data point index
 
-Every data point the engine can use, where it comes from, and what it powers. Status: **used** means the engine reads it today (wave 1 merged or wave 2 building); **specified** means spec v0.3 defines it and a later wave builds it (P9 decisions, P11 pipeline); **planned** means a logged follow-up (`spec/followups/open.md`) and not yet in the spec. Source of truth for field names: `src/bayesian_marketing/core/` and `registries/channels.yaml`.
+What the engine can take in today and how far each data point has really travelled. Field names follow `src/bayesian_marketing/core/` and `registries/channels.yaml`. The wider catalogue of evidence worth adding later is `spec/Data_Point_Expansion_Review_2026-11-03.md`; this index covers only what the engine has a path for.
 
-Required means the engine refuses to decide without it. Everything else improves precision or unlocks a feature.
+## Maturity ladder
+
+Each data point gets six separate answers, because they differ for the same field.
+
+| Step | Meaning |
+|---|---|
+| Spec | spec v0.3 or a decision defines it |
+| Repr | a core type can hold it |
+| Ingest | a reader (CSV export) or connector (API) fills it |
+| Use | a model, decision or report consumes it |
+| Tested | a fixture or simulator test exercises that path |
+| Live | verified against a real account or export |
+
+Marks: **y** yes; **–** no; **D34** being added now by the D34 integration fix; **P5/P11** arrives with that piece (P5 joint model, P11 pipeline). As of 2026-11-03, live verification exists only for GA4 (the owner's Tao of Atma property) and for an empty Meta account.
+
+"Required" is per use. Ingest needs only the ingest-minimum fields; a decision also needs the decision-minimum fields; a named claim (lifetime value, causal lift) needs its own evidence and is refused without it.
 
 ## 1. Client and account setup (`ClientConfig`)
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Client id | yes | used | every record, approval and report |
-| Account timezone | yes | used | normalizing dates (§5.1 C2), lag in calendar days (D27) |
-| Reporting currency | yes | used | money checks; refuses mixed currencies (G9) |
-| Ad account id per platform (Meta `act_…`, Google Ads customer id, LinkedIn account id) | per platform used | used | connectors |
-| Partner or user access for the agency on each ad account | per platform used | used | connectors read with the agency's token |
-| GA4 property id, with the agency login as Viewer | no | used | site-side conversions, the observed check on platform-reported numbers |
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Client id | ingest | y | y | y | y | y | – |
+| Account timezone | ingest | y | y | y | y | y | GA4 |
+| Reporting currency | ingest | y | y | y | y | y | GA4 |
+| Ad account id per platform | ingest | y | y | y | y | y | Meta (empty) |
+| Agency access on each ad account | ingest | y | – | y | – | – | Meta |
+| GA4 property id, agency login as Viewer | site outcomes | y | y | y | y | y | GA4 |
 
 ## 2. Unit economics (`ClientEconomics`)
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Price per order, or "use the modeled average order value" | yes | used | value of a conversion (D14) |
-| Variable cost per order: production, fulfilment, payment fees, expected returns | yes | used | contribution = price − variable cost (D14) |
-| Loss tolerance per decision (default policy 5% of monthly spend) | yes | used | whether a decision is knowable (D9, D16, G9) |
-| Survival floor: the spend or contribution level the business cannot drop below | no | specified | allocation never recommends below it (P9) |
-| Test budget | no | used | whether buying more data is worth it (EVSI, §6.3) |
-| Repeat purchase value (a distribution) | no | specified | value beyond the first order |
-| Switching cost when changing ads (learning-phase cost) | no | specified | hold vs switch (`switching_cost_hold`) |
-| Who approved the economics, and when | yes | used | economics must be approved before any decision |
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Price per order, or "use modeled order value" | decisions | y | y | file | y | y | – |
+| Variable cost per order | decisions | y | y | file | y | y | – |
+| Loss tolerance per decision | decisions (G9) | y | y | file | y | y | – |
+| Owner approval of the economics | decisions | y | y | file | y | y | – |
+| Survival floor | allocation | y | y | file | y | y | – |
+| Test budget | buy-more-data decisions | y | y | file | y | y | – |
+| Switching cost (learning phase) | keep-vs-switch | y | registry | registry | y | y | – |
+| Repeat purchase value | value beyond first order | y | y | file | – | – | – |
+| Per-product or per-plan economics | many-product clients | – | – | – | – | – | – |
 
-## 3. Ad platform performance, per ad per day (`PerformanceRow`)
+"file" means the economics JSON a client run points at; intake writes it.
 
-Pulled by the connectors or read from a CSV export. Hierarchy: account → campaign → ad set (ad group, LinkedIn campaign) → ad.
+## 3. Ad performance, per ad per day (`PerformanceRow`)
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Date (daily breakdown) | yes | used | everything; non-daily aggregates are quarantined |
-| Account, campaign, ad set and ad ids and names | yes (ad id) | used | the funnel per ad; pooling across ads |
-| Impressions | yes | used | CTR, CPM (delivery) |
-| Link clicks (Meta), clicks (Google Ads, LinkedIn) | yes | used | CTR, CPC, CVR trials |
-| Spend | yes | used | CPM, CPC, CPA, ROAS |
-| Currency | yes | used | money checks |
-| Conversions as the platform reports them (may be fractional or modeled) | no | used | platform-attributed CVR, CPA; flagged as reported, not observed (C8) |
-| Conversion value as reported | no | used | platform ROAS, with its caveat |
-| Attribution setting (e.g. 7-day click, 1-day view) | yes | used | splits the series when it changes (C5); sets the lag curve |
-| Objective / result type (Meta "Results") | no | used | flags mixed objectives; Results are not assumed to be purchases |
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Date (daily rows only; aggregates quarantined) | ingest | y | y | y | y | y | – |
+| Account, campaign, ad set, ad ids | ingest | y | y | y | y | y | – |
+| Account, campaign, ad set, ad names | reports | y | y | D34 | D34 | D34 | – |
+| Campaign objective / optimization event | comparability | y | y | D34 | D34 | D34 | – |
+| Impressions | delivery, CTR, CPM | y | y | y | y | y | – |
+| Clicks (Meta link clicks) | CTR, CPC, CVR trials | y | y | y | y | y | – |
+| Spend | cost metrics | y | y | y | y | y | – |
+| Currency | money checks | y | y | y | y | y | – |
+| Reported conversions (may be fractional or modeled) | platform series | y | y | y | y | y | – |
+| Reported conversions above clicks (view-through etc.) | platform series | y | y | D34 | D34 | D34 | – |
+| Reported conversion value | platform ROAS | y | y | y | y | y | – |
+| Attribution setting | series splits, lag curve | y | y | y | y | y | – |
 
-## 4. Orders and sales (CRM, shop, payments)
+## 4. Orders and sales (orders format in `registries/channels.yaml`)
 
-The engine's own orders format (`registries/channels.yaml`, `orders`). The intake maps any CRM or shop export into it.
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Order id | dedupe | y | y | y | y | y | – |
+| Ordered at, with timezone offset | observed conversions, lag | y | y | y | y | y | – |
+| Order value and currency | order value, ROAS | y | y | y | y | y | – |
+| Refunded amount | net value | y | y | y | y | y | – |
+| UTM source, medium, campaign, content | order-to-campaign match | y | y | y | P11 | – | – |
+| Click id (fbclid, gclid, li_fat_id) | order-to-ad match | y | y | y | P11 | – | – |
+| First click time | client's own lag curve | y | y | y | y | y | – |
+| Customer id | repeat value, cohorts | – | – | – | – | – | – |
+| Order lines: SKU, quantity, unit price | product contribution | – | – | – | – | – | – |
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Order id | yes | used | dedupe |
-| Ordered at (timestamp with timezone offset) | yes | used | observed conversions, lag |
-| Order value and currency | yes | used | observed order value, AOV, ROAS |
-| Refunded amount | yes | used | net value |
-| UTM source, medium, campaign, content | no | used | ties an order to a campaign and ad |
-| Click id (fbclid, gclid, li_fat_id) | no | used | ties an order to an ad more reliably than UTMs |
-| First click time | no | used | conversion lag estimated from the client's own data (P7) |
-| Customer id | no | planned | repeat value, cohorts |
-| Product / SKU and quantity | no | planned | per-product value when a client sells several things |
+UTMs and click ids are associations under a matching rule, not proof that an ad caused the order.
 
 ## 5. Site analytics (GA4, `SiteRow`)
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Date | yes | used | daily series |
-| Session source, medium, campaign | yes | used | channel and campaign mapping |
-| Sessions | yes | used | site-side conversion rate |
-| Ecommerce purchases | yes | used | observed conversions when no orders export exists |
-| Purchase revenue | yes | used | observed value |
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Date | ingest | y | y | y | y | y | y |
+| Session source, medium, campaign | channel mapping | y | y | y | y | y | y |
+| Sessions | site conversion rate | y | y | y | y | y | y |
+| Ecommerce purchases | site-recorded conversions | y | y | y | y | y | y |
+| Purchase revenue | site-recorded value | y | y | y | y | y | y |
+| Property timezone and currency (response metadata) | normalization | y | y | y | y | y | y |
+| Sampling, thresholding, data-loss flags | data quality | y | notes | D34 | D34 | D34 | – |
+
+GA4 purchases are events the site tag recorded. They can be duplicated or missed, so the engine calls them site-recorded, not verified orders.
 
 ## 6. Subscriptions and members (planned)
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Member id, signup date, cancel date (or still active) | for subscription clients | planned | retention curve |
-| Plan price per period and billing period | for subscription clients | planned | value per subscriber |
-| Acquisition source per member (UTM or click id at signup) | no | planned | value per channel, not only per subscriber |
-| Pauses, plan changes, failed payments | no | planned | refines retention |
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Objective "subscription_contribution" | naming the goal | y | y | – | refused (D33) | y | – |
+| Member id, signup, paid start, cancel or still active | retention | – | – | – | – | – | – |
+| Plan price, billing period, invoices paid, refunds | value per subscriber | – | – | – | – | – | – |
+| Acquisition source per member | value per channel | – | – | – | – | – | – |
 
-## 7. History for priors (P7)
+Still-active members are incomplete observations, not zero churn.
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Past campaign results: clicks, conversions per campaign or month | no | used | client priors via `prior_from_cohorts`, discounted |
-| Industry, product type, price point, platform, audience temperature | no | planned | picks a vertical prior for clients without history |
-| Vertical benchmark tables with their sample sizes | no | planned | the vertical priors themselves; owner-approved |
-| Owner approval of each prior | yes before client use | used | G8 blocks unapproved priors on client data |
+## 7. Leads (planned)
 
-## 8. Decision and test settings (per decision)
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Objective "leads" | naming the goal | y | y | – | refused (D33) | y | – |
+| Lead, qualification, opportunity, won/lost, cash dates | lead-to-cash value | – | – | – | – | – | – |
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| Objective: contribution, orders or clicks | yes | used | what "better" means |
-| Horizon: clicks, impressions, spend or days | yes | used | the size of the decision being priced |
-| Options being compared (which ads, ad sets or channels) | yes | used | compare, allocate, stop or continue |
-| Test design: cost, sample size, duration | no | used | value of the test vs its cost |
+## 8. History for priors
 
-## 9. Outcomes, after a decision
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Framework default priors (10, owner-approved D32) | every fit | y | y | registry | y | y | – |
+| Past results per campaign or month (counts) | client priors | y | y | function | y | y | – |
+| Owner approval of each client prior | client fits (G8) | y | y | y | y | y | – |
+| Industry and product for a vertical prior | clients without history | y | – | – | – | – | – |
+| Vertical benchmark tables with sample sizes | vertical priors | – | – | – | – | – | – |
 
-| Data point | Required | Status | Powers |
-|---|---|---|---|
-| What was approved and acted on | yes | used | append-only run record |
-| What happened afterwards (realized results) | no | specified | shadow scoring of the engine's own calls |
+## 9. Decision settings and outcomes
+
+| Data point | Needed for | Spec | Repr | Ingest | Use | Tested | Live |
+|---|---|---|---|---|---|---|---|
+| Objective: contribution, orders or clicks | decisions | y | y | request | y | y | – |
+| Horizon: clicks, impressions, spend or days | decisions | y | y | request | y | y | – |
+| Options compared | decisions | y | y | request | y | y | – |
+| Test design: cost, size, duration | test decisions | y | y | y | y | y | – |
+| Approval of each recommendation | acting | y | y | y | y | y | – |
+| Realized outcome after a decision | shadow scoring | y | y | y | y | y | – |
 
 ## What each tester needs first
 
-| Tester | Minimum to start |
+| Tester | Minimum |
 |---|---|
-| A client with no history (Jo) | sections 1, 2 and 3 on her Meta account; section 7 industry fields once vertical priors exist |
-| A client with history (Lieven) | sections 1, 2 and 4, plus 6 for members; section 3 for whichever platform he chooses |
+| Client with no history (Jo, Meta) | sections 1, 2 and 3 for her account; a vertical prior once section 8's vertical rows exist |
+| Client with history (Lieven) | sections 1, 2 and 4; section 6 before any subscriber-value claim; section 3 for the platform he picks |
