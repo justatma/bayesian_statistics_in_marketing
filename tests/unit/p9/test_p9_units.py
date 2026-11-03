@@ -14,8 +14,10 @@ from bayesian_marketing.audit.report import guarantee_report
 from bayesian_marketing.core import registries
 from bayesian_marketing.decision import run_record
 from bayesian_marketing.decision.allocation import allocate, bounded_shares
+from bayesian_marketing.decision.guarantees import render_guarantee
 from bayesian_marketing.decision.reallocation import reallocate
 from bayesian_marketing.decision.stopping import stop_or_continue
+from bayesian_marketing.floors.estimability import decision_feasibility
 
 REPO = Path(__file__).resolve().parents[3]
 RUN = "run_p9unit001"
@@ -94,9 +96,46 @@ def test_rate_basis_refused() -> None:
 
 
 def test_floor_without_q05_blocks_switch() -> None:
-    rec = reallocate(_cmp(), _est(), B.economics(survival_floor=0), RUN)
+    c = _cmp().model_copy(update={"value_q05": {"keep": B.money(500)}})
+    rec = reallocate(c, _est(), B.economics(survival_floor=0), RUN)
     assert rec.action == "hold"
     assert "survival floor" in rec.model_dump_json()
+
+
+def test_review9_every_option_breaching_floor_is_not_knowable() -> None:
+    c = _cmp().model_copy(update={"value_q05": {"keep": B.money(-5), "switch": B.money(-9)}})
+    rec = reallocate(c, _est(), B.economics(survival_floor=100), RUN)
+    assert rec.action == "not_knowable"
+    assert "survival floor" in rec.model_dump_json()
+
+
+def test_review3_comparison_currency_must_match_economics() -> None:
+    c = _cmp()
+    eur = c.model_copy(update={"expected_value": {k: B.money(1, "EUR") for k in c.options}})
+    with pytest.raises(ValueError, match="EUR"):
+        reallocate(eur, _est(), B.economics(), RUN)
+    q05 = c.model_copy(update={"value_q05": {k: B.money(1, "EUR") for k in c.options}})
+    with pytest.raises(ValueError, match="EUR"):
+        reallocate(q05, _est(), B.economics(), RUN)
+    loss = c.model_copy(update={"expected_loss": {k: B.money(1, "EUR") for k in c.options}})
+    with pytest.raises(ValueError, match="EUR"):
+        stop_or_continue(loss, _est(), _data(("keep", "switch")), B.economics(), RUN)
+
+
+def test_review2_stop_projects_volume_when_required_is_none() -> None:
+    c = B.comparison(expected_loss={"ad_a": 9000, "ad_b": 3000})
+    econ = B.economics(test_budget=10**9)
+    feas = decision_feasibility(c, econ)  # real floors: below floor, required None
+    assert feas.status == "below_floor"
+    assert feas.required is None
+    rec = stop_or_continue(c, feas, _data(("ad_a", "ad_b")), econ, RUN)
+    assert rec.action == "continue_test"
+    # 200 clicks so far, L/tol = 3: 200 x (9 - 1) = 1600 more clicks at $1.20
+    assert rec.params["remaining_volume"]["amount"] == pytest.approx(1600)
+    assert float(rec.params["remaining_cost"]) == pytest.approx(1920)
+    assert "approximate" in rec.model_dump_json()
+    poor = stop_or_continue(c, feas, _data(("ad_a", "ad_b")), B.economics(test_budget=100), RUN)
+    assert poor.action == "not_knowable"
 
 
 def test_stop_without_budget_or_required_is_not_knowable() -> None:
@@ -133,6 +172,37 @@ def test_bounded_shares() -> None:
     assert max(s.values()) <= 0.4 + 1e-12
     with pytest.raises(ValueError):
         bounded_shares({"a": 1.0}, 0.1, 0.9)
+
+
+def test_review8_bounded_shares_single_arm_near_cap() -> None:
+    assert bounded_shares({"a": 1.0}, 0.0, 1.0 - 1e-13) == {"a": pytest.approx(1.0)}
+    assert bounded_shares({"a": 0.5, "b": 0.5}, 0.1, 0.5 - 1e-13)["a"] == pytest.approx(0.5)
+    with pytest.raises(ValueError):
+        bounded_shares({"a": float("nan"), "b": 0.5}, 0.1, 0.9)
+
+
+def test_review4_many_arms_stay_proportional() -> None:
+    pb = {f"a{i}": (0.81 if i == 0 else 0.01) for i in range(20)}
+    rec = allocate(B.comparison(tuple(pb), p_best=pb), RUN)
+    alloc = rec.params["allocation"]
+    assert sum(alloc.values()) == pytest.approx(1.0)
+    assert alloc["a0"] > 5 * alloc["a1"]  # not uniform
+    assert min(alloc.values()) == pytest.approx(0.5 / 20)
+    assert any("minimum arm share relaxed" in n for n in rec.params["notices"])
+
+
+def test_review1_allocate_gates_economics(tmp_path: Path) -> None:
+    (tmp_path / "configs" / "economics").mkdir(parents=True)
+    c = B.comparison(p_best={"ad_a": 0.8, "ad_b": 0.2})
+    for econ, why in ((B.economics(approved=False), "not approved"),
+                      (B.economics(loss_tolerance=None), "no loss tolerance set")):  # fmt: skip
+        (tmp_path / "configs" / "economics" / f"{econ.economics_id}.json").write_text(
+            econ.model_dump_json()
+        )
+        rec = allocate(c, RUN)
+        assert rec.action == "not_knowable"
+        assert rec.guarantee.kind == "none"
+        assert why in render_guarantee(rec.guarantee)
 
 
 def test_allocation_reads_economics_and_relaxes_cap(tmp_path: Path) -> None:
@@ -174,11 +244,54 @@ def test_audit_keeps_evidence_and_sources_apart() -> None:
         )
     report = guarantee_report(B.D_START)
     assert set(report.by_source) == {
+        "atmaos",
         "atmaos.platform_attributed",
         "atmaos.observed",
         "ground_truth",
+        "ground_truth.unclassified",
     }
+    assert "mean_benefit_error" not in report.by_source["atmaos"]  # counts only, never pooled
+    assert report.by_source["atmaos"]["n_outcomes"] == 2
     assert report.by_source["atmaos.observed"]["mean_benefit_error"] == pytest.approx(-50.0)
-    assert report.coverage_90["ground_truth"] == 1.0
-    assert report.regret["ground_truth"] == 10.0
+    assert report.coverage_90["ground_truth.unclassified"] == 1.0
+    assert report.regret["ground_truth.unclassified"] == 10.0
     assert guarantee_report(B.D_END.replace(year=2027)).n_recommendations == 0
+
+
+def _outcome(rec_id: str, **realized: object) -> C.OutcomeRecord:
+    return C.OutcomeRecord(
+        recommendation_id=rec_id, source="atmaos", realized=realized, recorded_at=B.T0
+    )
+
+
+def test_review5_bad_evidence_and_currency_are_skipped_or_refused() -> None:
+    rec = B.recommendation(run_id=RUN, recommendation_id="rec_p9unit02")
+    run_record.append(rec)
+    run_record.append(_outcome(rec.recommendation_id, benefit=1.0, evidence="vibes"))
+    run_record.append(_outcome(rec.recommendation_id, benefit=1.0, currency="EUR"))
+    report = guarantee_report(B.D_START)
+    assert report.by_source["atmaos"]["n_skipped_bad_evidence"] == 1
+    assert report.by_source["atmaos"]["n_skipped_currency"] == 1
+    assert report.n_recommendations == 0
+
+    eur = C.Recommendation.model_validate(
+        rec.model_dump()
+        | {
+            "recommendation_id": "rec_p9unit03",
+            "expected_benefit": {"amount": "5", "currency": "EUR"},
+            "expected_loss": {"amount": "1", "currency": "EUR"},
+        }
+    )
+    run_record.append(eur)
+    run_record.append(_outcome(rec.recommendation_id, benefit=1.0))
+    run_record.append(_outcome(eur.recommendation_id, benefit=1.0))
+    with pytest.raises(ValueError, match="currencies"):
+        guarantee_report(B.D_START)
+
+
+def test_review6_n_recommendations_counts_only_those_with_outcomes() -> None:
+    run_record.append(B.run_record(RUN))
+    run_record.append(B.recommendation(run_id=RUN, recommendation_id="rec_p9unit04"))
+    run_record.append(B.recommendation(run_id=RUN, recommendation_id="rec_p9unit05"))
+    run_record.append(_outcome("rec_p9unit04", benefit=1.0))
+    assert guarantee_report(B.D_START).n_recommendations == 1

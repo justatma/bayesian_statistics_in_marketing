@@ -50,6 +50,10 @@ SURVIVAL_INCUMBENT = (
     "the incumbent {option} breaches the survival floor {floor} and no eligible switch beats it"
 )
 """Requested key: phrasing.yaml notices.survival_floor_incumbent."""
+ALL_BREACH = "every option, the incumbent included, breaches the survival floor {floor}"
+"""§8.2 C3. Requested key: phrasing.yaml reasons.survival_floor_all."""
+ALL_BREACH_REQUIREMENT = "no option can be recommended until one clears the survival floor"
+"""Requested key: phrasing.yaml requirements.survival_floor_all."""
 UNAPPROVED_REASON = "economics not approved"
 """I12. Requested key: phrasing.yaml reasons.economics_unapproved."""
 NO_SCOPE_NOTICE = "scope not given: the platform and window of this recommendation are unknown"
@@ -112,6 +116,17 @@ def check_economics(c: Comparison, econ: ClientEconomics) -> None:
         raise ValueError(
             f"comparison uses economics {c.economics_id!r}, given {econ.economics_id!r}"
         )
+    check_currency(c, econ.currency)
+
+
+def check_currency(c: Comparison, currency: str) -> None:
+    """Refuse a Comparison whose money is in another currency than the economics'."""
+    for field in ("expected_value", "expected_loss", "value_q05"):
+        for option, m in (getattr(c, field) or {}).items():
+            if m.currency != currency:
+                raise ValueError(
+                    f"comparison {field}[{option!r}] is in {m.currency}, economics in {currency}"
+                )
 
 
 def economics_block(econ: ClientEconomics) -> str | None:
@@ -171,6 +186,8 @@ def base_slots(c: Comparison, currency: str) -> dict[str, str]:
 def make_guarantee(
     kind: str, slots: dict[str, str], statement_math: str, assumptions: list[str]
 ) -> Guarantee:
+    # Slot values never carry template braces (an option named "a{b}" would read as a slot).
+    slots = {k: v.replace("{", "(").replace("}", ")") for k, v in slots.items()}
     g = Guarantee(
         kind=kind,
         statement_math=statement_math,
@@ -185,7 +202,14 @@ def make_guarantee(
 def loss_guarantee(
     c: Comparison, econ: ClientEconomics, option: str, notices: list[str]
 ) -> Guarantee:
-    assert econ.loss_tolerance is not None
+    if econ.loss_tolerance is None:
+        raise ValueError(NO_TOLERANCE_REASON)
+    loss = c.expected_loss[option]
+    if loss.currency != econ.currency or econ.loss_tolerance.currency != econ.currency:
+        raise ValueError(
+            f"expected loss in {loss.currency}, tolerance in {econ.loss_tolerance.currency}, "
+            f"economics in {econ.currency}"
+        )
     slots = base_slots(c, econ.currency) | {
         "option": option,
         "expected_loss": fmt_money(c.expected_loss[option]),
@@ -202,7 +226,6 @@ def none_guarantee(
     c: Comparison, currency: str, reason: str, requirement: str, notices: list[str]
 ) -> Guarantee:
     slots = base_slots(c, currency) | {"reason": reason, "requirement": requirement}
-    slots = {k: v.replace("{", "(").replace("}", ")") for k, v in slots.items()}
     return make_guarantee(
         "none", slots, f"no recommendation: {reason}", [slots["assumption"], *notices]
     )
@@ -344,6 +367,24 @@ def reallocate(
         "expected_benefit_before_switching_cost": None if benefit is None else str(benefit),
         "net_benefit": None if net is None else str(net),
     }
+
+    if blocked >= set(c.options):  # §8.2 C3: no option may be recommended, not even holding
+        assert econ.survival_floor is not None
+        reason = ALL_BREACH.format(floor=fmt_money(econ.survival_floor))
+        params |= {"notices": notices}
+        return build(
+            action="not_knowable",
+            c=c,
+            scope=rec_scope,
+            params=params,
+            decision=decision,
+            economics_id=econ.economics_id,
+            guarantee=none_guarantee(c, cur, reason, ALL_BREACH_REQUIREMENT, notices),
+            expected_benefit=None,
+            expected_loss=None,
+            reversibility=reversibility,
+            run_id=run_id,
+        )
 
     if decision.status == "below_floor":
         reason = "; ".join(decision.reasons)

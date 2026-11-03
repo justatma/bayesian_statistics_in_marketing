@@ -7,8 +7,9 @@ C2. An estimable decision held back only by immature cohorts gives ``continue_te
 notice "waiting for late conversions".
 C3. A decision that is not estimable continues the test, priced: ``Feasibility.required`` is the
 additional volume in the horizon's unit, priced at the observed unit cost of the compared options
-(spend per click, per impression or per day). A cost above ``test_budget``, an unpriceable
-volume, or no test budget gives ``not_knowable``.
+(spend per click, per impression or per day). When ``required`` is None (floors does not project
+it), the volume is projected here by §6.1 variance scaling and labelled approximate. A cost above
+``test_budget``, an unprojectable or unpriceable volume, or no test budget gives ``not_knowable``.
 """
 
 from __future__ import annotations
@@ -48,9 +49,17 @@ OVER_BUDGET_REQUIREMENT = (
 )
 UNPRICED_REQUIREMENT = "the remaining volume could not be priced: {why}"
 NO_BUDGET = "no test budget set"
-NO_REQUIRED = "the additional volume to reach the tolerance was not projected"
+NEEDS_ECONOMICS = "approved economics with a loss tolerance are needed before stopping"
 NO_UNIT_COST = "the compared options have no {unit} to price from"
 MATURE_REQUIREMENT = "wait until the cited cohorts reach {maturity} maturity"
+PROJECTED_NOTICE = (
+    "approximate: the additional volume was projected here by variance scaling (expected loss "
+    "taken to fall as volume^-1/2) and priced at the observed spend per {unit}"
+)
+NO_PROJECTION = (
+    "the additional volume could not be projected: no observed {unit} for the compared options, "
+    "or the expected loss is already within tolerance"
+)
 
 
 def _rows(data: FunnelData, options: list[str]) -> list[int]:
@@ -73,6 +82,32 @@ def _immature(data: FunnelData, rows: list[int], min_maturity: float) -> list[di
                     }
                 )
     return out
+
+
+def _volume(data: FunnelData, rows: list[int], unit: str) -> float:
+    """Volume observed so far for the compared options, in the horizon's unit."""
+    if unit == "days":
+        return float(len(data.dates))
+    arr = {"clicks": data.clicks, "impressions": data.impressions, "spend": data.spend}[unit]
+    return float(sum(sum(arr[i]) for i in rows))
+
+
+def _projected_required(
+    c: Comparison, econ: ClientEconomics, data: FunnelData, rows: list[int]
+) -> float | None:
+    """Additional volume at which the projected expected loss reaches the tolerance (§6.1, the
+    variance-scaling route, approximate): L ∝ n^-1/2, so n_total = n_now x (L / tol)^2.
+
+    ``test_design`` has no projection that works without a FunnelState of joint draws, which
+    ``stop_or_continue`` does not receive; this is the §6.1 approximation in its place.
+    """
+    assert econ.loss_tolerance is not None
+    tol = float(econ.loss_tolerance.amount)
+    loss = min(float(c.expected_loss[o].amount) for o in c.options)
+    n_now = _volume(data, rows, c.objective.horizon.unit)
+    if n_now <= 0 or tol <= 0 or loss <= tol:
+        return None
+    return n_now * ((loss / tol) ** 2 - 1.0)
 
 
 def _unit_cost(data: FunnelData, rows: list[int], unit: str) -> float | None:
@@ -134,7 +169,7 @@ def stop_or_continue(
 
     blocked = economics_block(econ)
     if blocked is not None:
-        return out("not_knowable", none_guarantee(c, cur, blocked, NO_REQUIRED, notices))
+        return out("not_knowable", none_guarantee(c, cur, blocked, NEEDS_ECONOMICS, notices))
 
     if decision.status == "estimable":
         if not immature:
@@ -150,20 +185,25 @@ def stop_or_continue(
     # C3: not estimable. Price the remaining volume and compare with the test budget.
     reason = "; ".join(decision.reasons)
     unit = c.objective.horizon.unit
-    if decision.required is None:
-        req = UNPRICED_REQUIREMENT.format(why=NO_REQUIRED)
-        return out("not_knowable", none_guarantee(c, cur, reason, req, notices))
+    required = decision.required
+    if required is None:
+        required = _projected_required(c, econ, data, rows)
+        if required is None:
+            req = UNPRICED_REQUIREMENT.format(why=NO_PROJECTION.format(unit=unit))
+            return out("not_knowable", none_guarantee(c, cur, reason, req, notices))
+        notices.append(PROJECTED_NOTICE.format(unit=unit.rstrip("s")))
+        params["required_projected"] = True
     per_unit = _unit_cost(data, rows, unit)
     if per_unit is None:
         req = UNPRICED_REQUIREMENT.format(why=NO_UNIT_COST.format(unit=unit))
         return out("not_knowable", none_guarantee(c, cur, reason, req, notices))
-    cost: Money = money(round(Decimal(str(decision.required * per_unit)), 2), cur)
+    cost: Money = money(round(Decimal(str(required * per_unit)), 2), cur)
     params |= {
-        "remaining_volume": {"unit": unit, "amount": decision.required},
+        "remaining_volume": {"unit": unit, "amount": required},
         "remaining_cost": str(cost.amount),
         "test_budget": None if econ.test_budget is None else str(econ.test_budget.amount),
     }
-    volume = fmt_number(decision.required)
+    volume = fmt_number(required)
     if econ.test_budget is None:
         req = UNPRICED_REQUIREMENT.format(why=NO_BUDGET)
         return out("not_knowable", none_guarantee(c, cur, reason, req, notices))

@@ -2,16 +2,24 @@
 
 Reads the run record (under ``BAYES_DATA_DIR``). For each recommendation with an OutcomeRecord it
 compares the stated expected benefit and loss with what was realized and checks interval
-coverage. Sources are never pooled: ``by_source`` has one entry per ``OutcomeRecord.source``
-("atmaos", "ground_truth"); an outcome whose ``realized`` names an evidence class goes under
-``"<source>.<evidence>"`` instead, so platform-attributed, observed and modeled results stay apart.
+coverage. Sources and evidence classes are never pooled. Every metric lives in a bucket
+``"<source>.<evidence>"``: source is ``OutcomeRecord.source`` ("atmaos", "ground_truth") and
+evidence is ``realized["evidence"]`` (one of EVIDENCE_KINDS), or ``unclassified`` when the outcome
+names none. ``by_source["<source>"]`` holds counts only (outcomes, recommendations, skipped).
+``coverage_90`` and ``regret`` are keyed by bucket.
 
-Keys read from ``OutcomeRecord.realized`` (all optional, amounts in the account currency):
-``benefit`` (compared with ``expected_benefit``), ``loss`` (compared with ``expected_loss``),
-``regret`` (against the true best option), ``covered_90`` (bool), or ``interval_90`` [low, high]
-with ``truth`` (coverage computed), ``not_knowable_correct`` (bool, not_knowable verdicts only),
-``evidence`` (one of EVIDENCE_KINDS).
+Keys read from ``OutcomeRecord.realized`` (all optional): ``benefit`` (compared with
+``expected_benefit``), ``loss`` (compared with ``expected_loss``), ``regret`` (against the true
+best option), ``covered_90`` (bool), or ``interval_90`` [low, high] with ``truth`` (coverage
+computed), ``not_knowable_correct`` (bool, not_knowable verdicts only), ``evidence``, and
+``currency`` (ISO code of the money amounts; defaults to the recommendation's stated currency).
 
+An outcome with an evidence value outside EVIDENCE_KINDS is skipped and counted under
+``n_skipped_bad_evidence``; one whose currency differs from its recommendation's stated amounts
+is skipped and counted under ``n_skipped_currency``. Money is never averaged across currencies:
+scored outcomes in more than one currency raise ValueError.
+
+n_recommendations counts the recommendations in the window that have a scored OutcomeRecord.
 A recommendation is in the window when its run started on or after ``since``; when its run is not
 in the record, when any of its outcomes was recorded on or after ``since``. Outcomes recorded
 before ``since`` are not scored.
@@ -28,15 +36,22 @@ from bayesian_marketing.core import AuditReport, OutcomeRecord, Recommendation, 
 from bayesian_marketing.decision import run_record
 
 EVIDENCE_KINDS = ("platform_attributed", "observed", "modeled")
+UNCLASSIFIED = "unclassified"
 
 
-def _source_key(o: OutcomeRecord) -> str:
+def _evidence(o: OutcomeRecord) -> str | None:
+    """The outcome's evidence bucket name, or None when the value is not a known class."""
     ev = o.realized.get("evidence")
     if ev is None:
-        return o.source
-    if ev not in EVIDENCE_KINDS:
-        raise ValueError(f"outcome evidence {ev!r} is not one of {EVIDENCE_KINDS}")
-    return f"{o.source}.{ev}"
+        return UNCLASSIFIED
+    return ev if ev in EVIDENCE_KINDS else None
+
+
+def _stated_currency(rec: Recommendation) -> str | None:
+    for m in (rec.expected_benefit, rec.expected_loss):
+        if m is not None:
+            return m.currency
+    return None
 
 
 def _covered(r: dict[str, Any]) -> bool | None:
@@ -71,16 +86,33 @@ def guarantee_report(since: date) -> AuditReport:
 
     window = {rid: r for rid, r in recs.items() if in_window(r)}
     cols: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    scored: dict[str, set[str]] = defaultdict(set)
-    n_out: dict[str, int] = defaultdict(int)
+    counts: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    scored_by_source: dict[str, set[str]] = defaultdict(set)
+    scored: set[str] = set()
+    bucket_n: dict[str, int] = defaultdict(int)
+    currencies: set[str] = set()
     for o in outcomes:
         rec = window.get(o.recommendation_id)
         if rec is None:
             continue
-        key = _source_key(o)
-        m, r = cols[key], o.realized
-        scored[key].add(rec.recommendation_id)
-        n_out[key] += 1
+        r, summary = o.realized, counts[o.source]
+        ev = _evidence(o)
+        if ev is None:
+            summary["n_skipped_bad_evidence"] += 1
+            continue
+        stated_cur = _stated_currency(rec)
+        cur = r.get("currency", stated_cur)
+        if cur is not None and stated_cur is not None and cur != stated_cur:
+            summary["n_skipped_currency"] += 1
+            continue
+        if cur is not None:
+            currencies.add(str(cur))
+        key = f"{o.source}.{ev}"
+        m = cols[key]
+        bucket_n[key] += 1
+        summary["n_outcomes"] += 1
+        scored_by_source[o.source].add(rec.recommendation_id)
+        scored.add(rec.recommendation_id)
         if "benefit" in r:
             m["realized_benefit"].append(float(r["benefit"]))
             if rec.expected_benefit is not None:
@@ -100,20 +132,26 @@ def guarantee_report(since: date) -> AuditReport:
             m["coverage_90"].append(1.0 if cov else 0.0)
         if rec.action == "not_knowable" and "not_knowable_correct" in r:
             m["not_knowable_correct"].append(1.0 if r["not_knowable_correct"] else 0.0)
+    if len(currencies) > 1:
+        raise ValueError(f"outcomes span currencies {sorted(currencies)}; refusing to average")
 
     by_source: dict[str, dict[str, float]] = {}
+    for source, summary in counts.items():
+        by_source[source] = dict(summary) | {
+            "n_outcomes": summary.get("n_outcomes", 0.0),
+            "n_recommendations": float(len(scored_by_source[source])),
+        }
     for key, m in cols.items():
         stats = {f"mean_{k}": fmean(v) for k, v in m.items() if v and k != "coverage_90"}
         if m.get("coverage_90"):
             stats["coverage_90"] = fmean(m["coverage_90"])
-        stats["n_outcomes"] = float(n_out[key])
-        stats["n_recommendations"] = float(len(scored[key]))
+        stats["n_outcomes"] = float(bucket_n[key])
         by_source[key] = stats
 
     nk = [v for m in cols.values() for v in m.get("not_knowable_correct", [])]
     return AuditReport(
         since=since,
-        n_recommendations=len(window),
+        n_recommendations=len(scored),
         by_source=by_source,
         coverage_90={k: fmean(m["coverage_90"]) for k, m in cols.items() if m.get("coverage_90")},
         regret={k: fmean(m["regret"]) for k, m in cols.items() if m.get("regret")},
