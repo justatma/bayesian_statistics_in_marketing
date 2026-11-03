@@ -188,9 +188,12 @@ class Narrator:
                 if q is None or q.feasibility.status == "below_floor":
                     by_name.setdefault(name, []).append(ad)
                     shown.add((ad, name))
-        others = sum(1 for q in info["quantities"] if q.feasibility.status == "below_floor")
-        others += sum(len(m) for m in info["not_estimable"].values())
-        others -= len(shown)
+        # D40: count only what the report itself lists as not knowable
+        others = sum(
+            1
+            for q in info["quantities"]
+            if q.feasibility.status == "below_floor" and (q.scope.ids["ad"], q.name) not in shown
+        )
         parts = [f"{METRIC_LABELS[n]} for {', '.join(ads)}" for n, ads in by_name.items()]
         if others > 0:
             more = "1 more quantity" if others == 1 else f"{others:,} more quantities"
