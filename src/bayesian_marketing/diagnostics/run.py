@@ -56,6 +56,11 @@ CHUNK = 256  # orders simulated per block when summing an orders file (memory on
 
 log = logging.getLogger(__name__)
 
+NON_FINITE = "non-finite draws in "
+"""PPC-key prefix marking a parameter column with NaN or infinite draws. The report has no notes
+field, so ``run_diagnostics`` records the breach as ``ppc["non-finite draws in <col>"] = 0.0`` and
+``g3`` turns that key into the reason "non-finite draws in <col>" (manifest open question 5)."""
+
 NOT_COMPUTED = {
     "rhat": "rhat not computed: needs two or more equal-length chains of a non-constant parameter",
     "ess_bulk": "ess_bulk not computed: needs chain-labelled draws of equal length, non-constant",
@@ -290,15 +295,21 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
     df = pd.read_parquet(spec.samples_path)
     seed = _seed(state)
     params = spec.params or {}
-    if state.route == "conjugate":
-        sampler = "conjugate"
-        rhat = bulk = tail = None
-        div = None
+    sampler = "conjugate" if state.route == "conjugate" else "numpyro_nuts"
+    cols = _param_columns(df)
+    bad = [c for c in cols if not np.isfinite(df[c].to_numpy(dtype=float)).all()]
+    rhat = bulk = tail = None
+    div = None
+    if bad:
+        # Checked before any metric or PPC: ArviZ ranks an infinity as an ordinary value and the
+        # PPC draws cannot take NaN. Nothing else is computed; G3 fails on the marker keys.
+        log.warning("diagnostics: non-finite draws in %s; metrics and PPC skipped", bad)
+        ppc = {f"{NON_FINITE}{c}": 0.0 for c in bad}
     else:
-        sampler = "numpyro_nuts"
-        rhat, bulk, tail = _chain_stats(df)
-        div = _divergences(params)
-    ppc = _ppc(state, data, df[_param_columns(df)], seed)
+        if sampler == "numpyro_nuts":
+            rhat, bulk, tail = _chain_stats(df)
+            div = _divergences(params)
+        ppc = _ppc(state, data, df[cols], seed)
     payload = {"state": state.state_id, "ppc": ppc, "rhat": rhat, "seed": seed}
     return DiagnosticsReport(
         report_id=_report_id(payload),
@@ -319,7 +330,8 @@ def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
 
     One reason per breached threshold, naming the metric or the PPC stage. A None metric fails on
     a NUTS report (not computed) and is skipped on a conjugate one; NaN or infinity fails as not
-    finite. Never raises on a report.
+    finite. A ``non-finite draws in <col>`` PPC key is a breach with that reason. Never raises on
+    a report.
     """
     reasons: list[str] = []
     rhat_max = float(_threshold("rhat_max"))  # type: ignore[arg-type]
@@ -355,7 +367,9 @@ def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
     div = None if report.n_divergences is None else float(report.n_divergences)
     check("divergences", div, lambda x: x > div_max, f"above divergences_max {div_max}")
     for stage, p in sorted(report.ppc.items()):
-        if not math.isfinite(p) or p < lo or p > hi:
+        if stage.startswith(NON_FINITE):
+            reasons.append(stage)
+        elif not math.isfinite(p) or p < lo or p > hi:
             reasons.append(f"PPC misfit in stage {stage}: p-value {p} outside [{lo}, {hi}]")
 
     passed = not reasons

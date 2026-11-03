@@ -96,6 +96,21 @@ def test_nan_divergences_fail_not_crash(tmp_path: Path) -> None:
     assert any(r.startswith("divergences not computed") for r in res.reasons)
 
 
+@pytest.mark.parametrize("route", ["nuts", "conjugate"])
+@pytest.mark.parametrize("bad", [np.inf, np.nan])
+def test_non_finite_draws_fail_g3_and_skip_ppc(tmp_path: Path, route: str, bad: float) -> None:
+    col = _iid(2000)
+    col[17] = bad
+    cols = {"chain": np.repeat(np.arange(4), 500), "ad_a.ctr": col, "ad_b.ctr": _iid(2000, 1)}
+    st = B.samples_state(tmp_path / "s.parquet", cols, route=route, state_id="fs_r0000006")
+    st = st.model_copy(update={"posterior": st.posterior.model_copy(update={"params": {DIV: 0.0}})})
+    rep = run_diagnostics(st, B.north_pier_day14())  # NaN used to crash rng.binomial
+    assert set(rep.ppc) == {"non-finite draws in ad_a.ctr"}
+    out, res = g3(rep)
+    assert res.passed is False and out.passed is False
+    assert "non-finite draws in ad_a.ctr" in res.reasons
+
+
 def test_raising_step_is_a_recorded_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
 
