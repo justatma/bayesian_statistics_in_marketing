@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from tests.fakes import builders as B
 
 from bayesian_marketing import core as C
+from bayesian_marketing.core import registries
 from bayesian_marketing.derived_metrics.derive import derive
 from bayesian_marketing.inference import sampler_numpyro as S
 from bayesian_marketing.inference.router import route
@@ -90,6 +93,34 @@ def test_unapproved_prior_in_set_blocks_client_data_only() -> None:
     compile_model(B.funnel_spec(), bad, syn)
 
 
+def test_missing_structural_prior_g8_on_client_fallback_on_synthetic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D28 item 2: a path the PriorSet lacks raises G8 on client data; on synthetic data it may
+    use a registry pending placeholder, counted for the unapproved-priors notice."""
+    reg = tmp_path / "registries"
+    shutil.copytree(registries.registry_root(), reg)
+    path = reg / "priors" / "default.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["pending_records"] = {"logit_scale_ctr": {"family": "halfnormal", "params": {"scale": 1}}}
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    monkeypatch.setenv("BAYES_REGISTRY_DIR", str(reg))
+    registries.clear_cache()
+    try:
+        recs = dict(B.default_prior_set().records)
+        recs.pop("logit_scale_ctr")
+        priors = C.PriorSet(records=recs)
+        with pytest.raises(C.GateFailure) as e:
+            compile_model(B.funnel_spec(), priors, _ads(8))
+        assert e.value.result.gate == "G8"
+        syn = _ads(8).model_copy(update={"synthetic": True})
+        plan = load_plan(compile_model(B.funnel_spec(), priors, syn))
+        assert plan.unapproved == ["logit_scale_ctr"]
+        assert plan.terms["logit_scale_ctr"].source == "registry_pending"
+    finally:
+        registries.clear_cache()
+
+
 def test_fit_state_contract() -> None:
     data = _ads(8, order_values=[50.0, 70.0, 90.0])
     model = compile_model(B.funnel_spec(), B.default_prior_set(), data)
@@ -106,7 +137,7 @@ def test_fit_state_contract() -> None:
     params = state.posterior.params
     assert params["diagnostics.n_divergences"] == report.n_divergences
     assert params["ad_0.n.conversions"] == 3.0 and params["ad_0.n.orders"] == 3.0
-    assert params["route.unapproved_priors"] > 0  # pending structural priors (open question 1)
+    assert params["route.unapproved_priors"] == 0  # D32: every structural prior approved
     assert "currency.code" in params
     # not saved before G3 (P6 contract)
     assert not (Path(state.posterior.samples_path).parent / f"{state.state_id}.json").exists()

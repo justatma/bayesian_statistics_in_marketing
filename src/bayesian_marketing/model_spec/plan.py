@@ -9,9 +9,9 @@ Prior resolution, per parameter path the spec needs:
 
 1. the PriorSet record. An unapproved record raises G8 on client data (I10); on synthetic data it
    is allowed and counted in ``unapproved`` (D23 item 2).
-2. else the registry's ``priors/default`` ``pending_records`` placeholder (D22 item 4). These are
-   unapproved, so they are always counted in ``unapproved`` and disclosed downstream
-   (``route.unapproved_priors``). See the P5 manifest, open question 1.
+2. a path missing from the PriorSet raises G8 on client data (D28 item 2). On synthetic data only,
+   it falls back to a registry ``priors/default`` ``pending_records`` placeholder if one exists
+   (none since D32), counted in ``unapproved`` and disclosed (``route.unapproved_priors``).
 
 The LKJ concentration falls back to ``bounds/coupling/lkj_eta`` (an approved §14 default) when the
 PriorSet has no ``lkj_concentration`` record.
@@ -153,7 +153,18 @@ def resolve_term(priors: PriorSet, path: str, synthetic: bool) -> PriorTerm:
             approved=rec.approved,
             source="prior_set",
         )
-    pending = registries.load("priors/default").get("pending_records", {})
+    if not synthetic:  # D28 item 2: no unapproved fallback ever prices client data
+        res = GateResult(
+            gate="G8",
+            passed=False,
+            blocking=True,
+            reasons=[f"no approved prior for {path!r} in the PriorSet (I10)"],
+            inputs_hash=inputs_hash({"missing": path}),
+            checked_at=utcnow(),
+        )
+        raise GateFailure(res)
+    # Empty since D32 moved the placeholders into `records`; kept for any future pending entry.
+    pending = registries.load("priors/default").get("pending_records") or {}
     if path not in pending:
         raise KeyError(f"PriorSet has no record for {path!r} and the registry no placeholder")
     rec_d = pending[path]
