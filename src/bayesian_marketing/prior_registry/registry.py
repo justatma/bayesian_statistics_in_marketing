@@ -225,17 +225,23 @@ def approve(prior_id: str, approver: str) -> PriorRecord:
 
 
 def import_promoted(record: dict, promotion_id: str) -> str:
-    """Vertical prior from AtmaOS, carrying its promotion id (C4)."""
-    if not promotion_id or not isinstance(promotion_id, str):
+    """Vertical prior from AtmaOS, carrying its promotion id (C4).
+
+    The record is checked like a proposal (C6, refused when implausible) and stored unapproved:
+    AtmaOS promotion is not local approval, so the owner approves it here through ``approve``.
+    """
+    if not isinstance(promotion_id, str) or not promotion_id.strip():
         raise ValueError("import_promoted requires an AtmaOS promotion id")
+    promotion_id = promotion_id.strip()
     rec = PriorRecord.model_validate(record)
     carried = rec.elicitation.promotion_id
     if carried is not None and carried != promotion_id:
         raise ValueError(f"record carries promotion id {carried!r}, not {promotion_id!r}")
+    predictive_check(rec)  # raises PriorRefused
     owner = f"{VERTICAL_PREFIX}{promotion_id}"
     elic = rec.elicitation.model_dump()
-    elic.update(source="promoted", promotion_id=promotion_id)
-    rec = _rebuild(rec, elicitation=elic)
+    elic.update(source="promoted", promotion_id=promotion_id, approved_by=None, approved_at=None)
+    rec = _rebuild(rec, elicitation=elic, predictive_check=None)
     pid = _content_id(rec, owner)
     if not _record_path(pid).exists():
         _write_record(_rebuild(rec, prior_id=pid, resolution_path=[owner]))
@@ -243,14 +249,19 @@ def import_promoted(record: dict, promotion_id: str) -> str:
     return pid
 
 
-def _latest_client_prior(parameter_path: str, client_id: str) -> PriorRecord | None:
+def _latest_client_prior(
+    parameter_path: str, client_id: str, as_of: datetime
+) -> PriorRecord | None:
+    """The latest proposal for (client, path) whose elicitation was created by ``as_of``."""
     owner = f"{CLIENT_PREFIX}{client_id}"
-    latest: str | None = None
+    latest: PriorRecord | None = None
     for ev in _events():
         same = ev.get("owner") == owner and ev.get("parameter_path") == parameter_path
         if ev["event"] == "propose" and same:
-            latest = ev["prior_id"]
-    return _read_record(latest) if latest else None
+            rec = _read_record(ev["prior_id"])
+            if rec.elicitation.created_at <= as_of:
+                latest = rec
+    return latest
 
 
 def _as_dt(v: Any) -> datetime:
@@ -306,9 +317,11 @@ def _g8(parameter_path: str, client_id: str, as_of: datetime, reason: str) -> Ga
 def resolve(parameter_path: str, client_id: str, as_of: datetime) -> PriorRecord:
     """Client, then vertical, then default; every hop recorded (C2). Unapproved fails G8.
 
-    ``as_of`` is carried into the G8 inputs hash; proposals are not filtered by it (open question).
+    Proposals whose elicitation was created after ``as_of`` are invisible. Approval time is not
+    filtered: the frozen acceptance test approves at wall-clock time and resolves at an earlier
+    ``as_of`` (open question in the P7 manifest).
     """
-    client = _latest_client_prior(parameter_path, client_id)
+    client = _latest_client_prior(parameter_path, client_id, _as_dt(as_of))
     if client is not None:
         if not client.approved:
             raise _g8(
