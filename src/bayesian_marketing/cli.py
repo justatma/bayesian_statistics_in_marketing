@@ -70,6 +70,9 @@ LOSS_FOR = {
 }
 
 
+WHY_BOTH = "which ad is ahead is clear enough to act on; what each earns is not yet"
+
+
 def _say(label: str, text: str) -> None:
     print(f"{label + ':':<16}{text}", flush=True)
 
@@ -212,10 +215,30 @@ class Narrator:
                 line += f"; {len(negative)} of {_count(len(values), 'option')} negative"
             _say("Expected value", f"over the next {h}: {line}")
         self._not_knowable(info)
-        for r in info["recommendations"]:
-            self._recommendation(r, info, c)
+        if c is not None and self._compared_not_knowable(info):
+            # D39: a decision rests on expected loss (D9), not on each value's precision.
+            _say(
+                "Why both",
+                "which ad is ahead is clear enough to act on; what each earns is not yet",
+            )
+        recs = info["recommendations"]
+        testing = any(r.action == "continue_test" for r in recs)
+        for r in recs:
+            self._recommendation(r, info, c, testing)
 
-    def _recommendation(self, r: Any, info: dict[str, Any], c: Any) -> None:
+    @staticmethod
+    def _compared_not_knowable(info: dict[str, Any]) -> bool:
+        name = info["compare_quantity"]
+        for ad in info["variants"].values():
+            q = next(
+                (x for x in info["quantities"] if x.name == name and x.scope.ids["ad"] == ad),
+                None,
+            )
+            if q is None or q.feasibility.status == "below_floor":
+                return True
+        return False
+
+    def _recommendation(self, r: Any, info: dict[str, Any], c: Any, testing: bool = False) -> None:
         from bayesian_marketing.decision.reallocation import horizon_text
 
         action = ACTIONS.get(r.action, r.action)
@@ -228,11 +251,13 @@ class Narrator:
             if rest:
                 left = 100 * sum(float(s) for _, s in rest)
                 split += f", {_count(len(rest), 'other ad')} {left:.0f}% between them"
-            _say("Recommendation", f"{action}: {split}; needs human approval")
+            label = "While testing" if testing else "Recommendation"
+            _say(label, f"{action}: {split}; needs human approval")
         elif r.action in ("not_knowable", "continue_test"):
             why = "; ".join(x for x in (slots.get("reason"), slots.get("requirement")) if x)
             tail = "; needs human approval" if r.action != "not_knowable" else ""
-            _say("Recommendation", f"{action}: {why}{tail}")
+            label = "Test" if r.action == "continue_test" else "Recommendation"
+            _say(label, f"{action}: {why}{tail}")
         else:
             _say("Recommendation", f"{action}; needs human approval")
         if r.expected_loss is not None and r.action in LOSS_FOR:

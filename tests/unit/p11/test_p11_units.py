@@ -245,7 +245,9 @@ def test_demo_cli_prints_plain_stages_and_writes_report(
     assert code == 0
     labels = [line.split(":", 1)[0] for line in text.splitlines()[1:]]
     assert labels[:4] == ["Simulated", "Pulled", "Quarantined", "Fitted"]
-    assert "Report" in labels and "Recommendation" in labels and "Diagnostics" in labels
+    assert "Report" in labels and "Diagnostics" in labels
+    # D39: a split during a running test is labelled "While testing", the test itself "Test"
+    assert {"Recommendation", "While testing", "Test"} & set(labels)
     assert "exact per-ad model" in text and "—" not in text
     report = next((tmp_path / "demo").glob("report_*_demo.html"))
     assert "DEMO" in report.read_text()
