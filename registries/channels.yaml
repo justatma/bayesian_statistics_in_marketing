@@ -18,6 +18,7 @@
 version: v1
 channels:
   meta:
+    conversions_may_exceed_clicks: true   # link clicks are a subset of all clicks; one click can yield several purchases; view-through windows (D35)
     version: "2026-11-03"
     header_status: inferred
     export_map:
@@ -48,6 +49,7 @@ channels:
     freshness_date: 2026-11-03
     max_age_days: 90
   google_ads:
+    conversions_may_exceed_clicks: false   # frozen P1 fuzz quarantines it; Conversions exclude view-through (F1 G, VERIFIED) (D35)
     version: "2026-11-03"
     header_status: inferred
     export_map:
@@ -75,6 +77,7 @@ channels:
     freshness_date: 2026-11-03
     max_age_days: 90
   linkedin:
+    conversions_may_exceed_clicks: true   # Clicks are chargeable clicks only (F1 L8); view-through windows (D35)
     version: "2026-11-03"
     header_status: inferred
     export_map:

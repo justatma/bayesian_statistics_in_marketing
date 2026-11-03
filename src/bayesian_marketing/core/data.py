@@ -16,6 +16,12 @@ from bayesian_marketing.core.money import Money
 
 class PerformanceRow(Frozen):
     entity_ids: dict[str, str]  # keys among account, campaign, ad_set, ad
+    entity_names: dict[str, str] = Field(
+        default_factory=dict
+    )  # same keys; names change, ids don't (D34)
+    objective: str | None = (
+        None  # campaign objective / optimization event as the source states it (D34)
+    )
     date: date
     impressions: int
     clicks: int

@@ -23,6 +23,7 @@ lag:
     "28": 4                     # attributed median can sit a day earlier (1-day window: day 0)
 value:
   compound_gamma_k: 2.0         # placeholder, disclosed
+  min_log_sd: 0.05              # engineering choice (D36): floor on within-ad log order-value sd; fixed-price products
 allocation:
   min_arm_share: 0.10           # engineering choice
   max_arm_share: 0.90           # per-arm cap; config may lower it
