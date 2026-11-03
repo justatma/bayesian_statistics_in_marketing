@@ -207,9 +207,8 @@ def test_reference_prior_notices() -> None:
                                 "conv_obs": 30, "order_values": values}})  # fmt: skip
     # D32 approved CPM and order-value priors; drop them to exercise the reference-prior route.
     base = B.default_prior_set()
-    no_struct = C.PriorSet(records={k: v for k, v in base.records.items()
-                                    if k not in ("cpm_impressions_per_dollar",
-                                                 "order_value_log_mean", "order_value_log_sd")})  # fmt: skip
+    drop = ("cpm_impressions_per_dollar", "order_value_log_mean", "order_value_log_sd")
+    no_struct = C.PriorSet(records={k: v for k, v in base.records.items() if k not in drop})
     st = fit_conjugate(data, no_struct, seed=1)
     n = {name: derive(name, st, B.scope("a"), None).notices for name in
          ("cpm", "cpc", "roas", "aov", "ctr", "cvr")}  # fmt: skip
