@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from tests.fakes import builders as B
 
+from bayesian_marketing import core as C
 from bayesian_marketing.core import registries
 from bayesian_marketing.derived_metrics.derive import derive
-from bayesian_marketing import core as C
 from bayesian_marketing.floors.estimability import quantity_feasibility, registry_target
 from bayesian_marketing.inference.conjugate import fit_conjugate
 
