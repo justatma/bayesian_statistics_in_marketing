@@ -10,4 +10,4 @@ sampler:
   chains: 4
   draws: 1000
   warmup: 1000
-  target_accept: 0.9
+  target_accept: 0.99   # D37: 0 divergences on 8-ad fits needs 0.99 (P5 evidence); ~1.5-2x fit time
