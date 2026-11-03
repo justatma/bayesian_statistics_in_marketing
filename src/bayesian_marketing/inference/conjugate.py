@@ -11,6 +11,10 @@ The FunnelState's posterior is a ``samples`` DistributionSpec with ``family="con
   2 compound gamma), ``aov.compound_gamma_k``. State-wide: ``route.too_few_ads``,
   ``route.unapproved_priors`` (count; synthetic data only), ``currency.code`` (FunnelData.currency,
   see ``encode_currency``), ``seed``, ``n_draws``.
+- Reported conversions above a day's clicks (view-through, multi-event counting, reporting
+  dates; D34) are valid data but never enter the click-trial binomial: that day feeds the CPA
+  Gamma-Poisson and the compound-gamma order value only, and ``flag.reported_above_clicks``
+  counts such days for derive's notice. Observed conversions above clicks are refused.
 - CVR trials and CPA spend exposure are both scaled by the mature fraction F(a) (lag-adjusted,
   disclosed by notice); a day's lag-adjusted trials never fall below its conversions.
 - ``state_id`` hashes data, prior ids, seed and registry config only, so a refit of the same
@@ -90,7 +94,7 @@ def _validate(data: FunnelData) -> None:
                     continue
                 if not math.isfinite(c) or c < 0:
                     raise ValueError(f"{where}: {kind} conversions {c} are negative or non-finite")
-                if c > clicks:
+                if kind == "observed" and c > clicks:  # reported above clicks is valid (D34)
                     raise ValueError(f"{where}: {kind} conversions {c} exceed clicks {clicks}")
             f = data.mature_fraction[i][d]
             if not (math.isfinite(f) and 0.0 <= f <= 1.0):
@@ -118,12 +122,17 @@ def _ad_fit(data: FunnelData, i: int, pr: dict[str, PriorRecord | None], k: floa
     p["ctr.b"] = ctr["b"] + imps - clicks
 
     # Conversions per day: observed if present, else platform-reported (platform-modeled).
+    # A reported count above the day's clicks is not a click-trial outcome (D34): it counts for
+    # CPA but stays out of the CVR binomial.
     conv = 0.0
+    cvr_conv = 0.0
     trials = 0.0
     exposure = 0.0
     lagged = False
     modeled = False
+    above = 0
     conv_days = 0
+    cvr_days = 0
     for d in days:
         obs = data.conversions_observed[i][d]
         rep = data.conversions_reported[i][d]
@@ -137,15 +146,21 @@ def _ad_fit(data: FunnelData, i: int, pr: dict[str, PriorRecord | None], k: floa
         f = float(data.mature_fraction[i][d])
         conv_days += 1
         conv += c
-        # A day cannot have fewer lag-adjusted trials than conversions already seen (both ≤ clicks).
-        trials += max(data.clicks[i][d] * f, c)
         exposure += data.spend[i][d] * f  # lag-adjusted spend exposure for CPA (disclosed)
         if f < 1.0 and data.clicks[i][d] > 0:
             lagged = True
-    if conv_days:
+        if c > data.clicks[i][d]:  # only a reported count gets here (_validate)
+            above += 1
+            continue
+        cvr_days += 1
+        cvr_conv += c
+        # A day cannot have fewer lag-adjusted trials than conversions already seen (both ≤ clicks).
+        trials += max(data.clicks[i][d] * f, c)
+    if cvr_days:
         cvr = pr["cvr"].params  # type: ignore[union-attr]
-        p["cvr.a"] = cvr["a"] + conv
-        p["cvr.b"] = cvr["b"] + trials - conv
+        p["cvr.a"] = cvr["a"] + cvr_conv
+        p["cvr.b"] = cvr["b"] + trials - cvr_conv
+    if conv_days:
         cpd = pr["conversions_per_dollar"].params  # type: ignore[union-attr]
         p["cpa.a"] = cpd["shape"] + conv
         p["cpa.scale"] = cpd["rate"] + exposure
@@ -194,6 +209,7 @@ def _ad_fit(data: FunnelData, i: int, pr: dict[str, PriorRecord | None], k: floa
     p["spend"] = spend
     p["flag.lag_adjusted"] = 1.0 if lagged else 0.0
     p["flag.platform_modeled"] = 1.0 if modeled else 0.0
+    p["flag.reported_above_clicks"] = float(above)
     return p
 
 

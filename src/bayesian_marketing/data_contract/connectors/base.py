@@ -15,6 +15,11 @@ PERF_TARGETS = (
     "entity_ids.campaign",
     "entity_ids.ad_set",
     "entity_ids.ad",
+    "entity_ids.account_name",  # names land in PerformanceRow.entity_names (D34)
+    "entity_ids.campaign_name",
+    "entity_ids.ad_set_name",
+    "entity_ids.ad_name",
+    "objective",  # campaign objective / optimization event as the API states it (D34)
     "impressions",
     "clicks",
     "spend",

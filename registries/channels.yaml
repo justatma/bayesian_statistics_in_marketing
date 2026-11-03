@@ -11,6 +11,11 @@
 # entity_ids.campaign_name, entity_ids.ad_set, entity_ids.ad_set_name, entity_ids.ad,
 # entity_ids.ad_name, impressions, clicks, spend, currency, conversions_reported,
 # revenue_reported, attribution_window (and for orders/ga4 their own row fields).
+# The entity_ids.*_name targets land in PerformanceRow.entity_names (D34); ids stay the join key.
+#
+# objective_columns: headers, in order of preference, whose cell is the row's campaign objective
+# or result type as the export states it (PerformanceRow.objective, D34). Not an export_map field,
+# so the simulator does not write it.
 #
 # header_status: every literal header below is INFERRED or a placeholder (facts pack F1 found no
 # official list). They are verified against one real export per platform before any client use
@@ -43,6 +48,7 @@ channels:
       "Attribution setting": attribution_window
     ignored_columns: ["Clicks (all)", "Reach", "Reporting ends", "Result indicator",
                       "Cost per result", "Purchase ROAS (return on ad spend)"]
+    objective_columns: ["Result indicator"]   # F1 M-table "Results" row, INFERRED
     conversion_field_may_be_modeled: true   # Meta reports modeled conversions (F1 M15 unknown; safe side)
     default_attribution_window: "7d_click_1d_view"   # F1 M9
     learning_phase_switching_cost: null

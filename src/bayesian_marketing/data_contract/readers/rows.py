@@ -26,6 +26,9 @@ def ungroup(v: str, grouped: re.Pattern[str]) -> str:
 
 
 ENTITY_KEYS = ("account", "campaign", "ad_set", "ad")
+# channels.yaml maps name columns to ``entity_ids.<key>_name``; they land in entity_names (D34).
+NAME_SUFFIX = "_name"
+OBJECTIVE = "objective"  # table target for the campaign objective / result type (D34)
 
 
 @dataclass
@@ -35,6 +38,9 @@ class Context:
     table: Table
     fallback_currency: str | None  # manifest / economics currency, when the export carries none
     attribution_window: str  # used when the export has no attribution column
+    # channels.yaml conversions_may_exceed_clicks (D35): reported conversions above clicks are
+    # legitimate for this platform. False quarantines them.
+    conversions_may_exceed_clicks: bool = False
 
 
 class RowReader:
@@ -144,10 +150,17 @@ class RowReader:
 
 
 def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] | None, list[str]]:
-    """PerformanceRow fields (without conversions_observed, set by C8 later), or reasons."""
+    """PerformanceRow fields (without conversions_observed, set by C8 later), or reasons.
+
+    Reported conversions above clicks (D34) are kept when the platform's registry entry says
+    they may exceed clicks (``conversions_may_exceed_clicks``, D35), whatever the attribution
+    window; ``reported_above_clicks`` marks such a row for the pull note and is popped before the
+    row is built. Otherwise the row is quarantined.
+    """
     r = RowReader(ctx, cells)
     d = r.date()
     ids = {k: v for k in ENTITY_KEYS if (v := r.get(f"entity_ids.{k}")) is not None}
+    names = {k: v for k in ENTITY_KEYS if (v := r.get(f"entity_ids.{k}{NAME_SUFFIX}")) is not None}
     if "ad" not in ids:
         r.reasons.append("entity_ids.ad: missing")
     imp = r.count("impressions")
@@ -156,22 +169,27 @@ def performance_fields(ctx: Context, cells: list[str]) -> tuple[dict[str, Any] |
     conv_d = r.number("conversions_reported", required=False)
     rev = r.number("revenue_reported", required=False)
     cur = r.currency()
+    window = r.text("attribution_window") or ctx.attribution_window
     if imp is not None and clk is not None and clk > imp:
         r.reasons.append(f"clicks above impressions ({clk} > {imp})")
-    if conv_d is not None and clk is not None and conv_d > clk:
+    above = conv_d is not None and clk is not None and conv_d > clk
+    if above and not ctx.conversions_may_exceed_clicks:
         r.reasons.append(f"conversions above clicks ({conv_d} > {clk})")
     if r.reasons:
         return None, r.reasons
     assert cur is not None and spend is not None
     return {
         "entity_ids": ids,
+        "entity_names": names,
+        "objective": r.text(OBJECTIVE),
         "date": d,
         "impressions": imp,
         "clicks": clk,
         "spend": Money(amount=spend, currency=cur),
         "conversions_reported": None if conv_d is None else float(conv_d),
         "conversions_integral": conv_d is not None and conv_d == conv_d.to_integral_value(),
-        "attribution_window": r.text("attribution_window") or ctx.attribution_window,
+        "reported_above_clicks": above,
+        "attribution_window": window,
         "revenue_reported": None if rev is None else Money(amount=rev, currency=cur),
     }, []
 

@@ -56,7 +56,16 @@ RESPONSE = ("rows", "dimensionValues", "metricValues", "rowCount", "dimensionHea
 # Response metadata keys the connector reads. F5 §1 names `metadata` but not its keys; the
 # integrator's recording (data/recordings/ga4) shows both. Not in FIELDS: not verbatim in F5.
 META_TIMEZONE, META_CURRENCY = "timeZone", "currencyCode"
-FIELDS = DIMENSIONS + METRICS + BODY + RESPONSE
+# ResponseMetaData quality keys (D34). F5 §1 names `metadata` and VERIFIES only
+# dataTruncationReasons; the other four are named by the D34 brief after the ResponseMetaData
+# reference the data review cites (INFERRED, not verbatim in F5, so not in FIELDS).
+META_SAMPLING = "samplingMetadatas"  # [{samplesReadCount, samplingSpaceSize}]
+META_THRESHOLDING = "subjectToThresholding"  # bool
+META_OTHER_ROW = "dataLossFromOtherRow"  # bool: some rows aggregated into "(other)"
+META_RESTRICTION = "schemaRestrictionResponse"  # {activeMetricRestrictions: [...]}
+META_TRUNCATION = "dataTruncationReasons"  # F5 §1 VERIFIED (changelog 2026-09-14)
+QUALITY_PREFIX = "ga4_quality:"  # machine-readable prefix on a sampled or thresholded pull
+FIELDS = DIMENSIONS + METRICS + BODY + RESPONSE + (META_TRUNCATION,)
 
 RETRY_STATUS = frozenset({429, 500, 503})  # F5 §3
 
@@ -113,6 +122,7 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
     url = f"{API}{prop}:runReport"
     rows: list[dict[str, Any]] = []
     meta: dict[str, Any] = {}
+    quality: list[str] = []  # every page's ResponseMetaData, deduplicated (D34)
     offset = 0
     while True:
         body = {
@@ -137,8 +147,9 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
         )
         data = resp.body if isinstance(resp.body, dict) else {}
         _check_headers(data)
-        if not meta and isinstance(data.get("metadata"), dict):
-            meta = data["metadata"]
+        if isinstance(data.get("metadata"), dict):
+            meta = meta or data["metadata"]
+            quality += [n for n in quality_notes(data["metadata"]) if n not in quality]
         page = [r for r in data.get("rows") or [] if isinstance(r, dict)]
         rows += page
         offset += PAGE_LIMIT
@@ -146,6 +157,7 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
         if not page or offset >= total:  # F5 §1: loop until offset >= rowCount
             break
     tz, currency, notes = account_facts(meta, config)
+    notes += quality
     return Fetched(
         timezone=tz,
         currency=currency,
@@ -177,3 +189,54 @@ def account_facts(meta: dict[str, Any], config: ClientConfig) -> tuple[str, str,
             )
         out.append(got)
     return out[0], out[1], notes
+
+
+def _count(v: Any) -> str:
+    t = text(v)
+    return t if t is not None else "unknown"
+
+
+def quality_notes(meta: dict[str, Any]) -> list[str]:
+    """Pull notes for sampling, thresholding, "(other)" aggregation, metric restrictions and
+    truncation in the runReport metadata (D34). Sampled and thresholded pulls carry the
+    ``ga4_quality:`` prefix so floors and reports can find them."""
+    notes: list[str] = []
+    sampling = meta.get(META_SAMPLING)
+    if isinstance(sampling, list) and sampling:
+        parts = [
+            f"{_count(m.get('samplesReadCount'))} of {_count(m.get('samplingSpaceSize'))}"
+            for m in sampling
+            if isinstance(m, dict)
+        ]
+        notes.append(
+            f"{QUALITY_PREFIX} sampled; samples read of sampling space per date range: "
+            f"{', '.join(parts) or 'unknown'}"
+        )
+    if meta.get(META_THRESHOLDING) is True:
+        notes.append(f"{QUALITY_PREFIX} thresholded; rows with small user counts may be withheld")
+    if meta.get(META_OTHER_ROW) is True:
+        notes.append(f'{PLATFORM}: some rows were aggregated into "(other)" ({META_OTHER_ROW})')
+    restriction = meta.get(META_RESTRICTION)
+    restricted = (
+        restriction.get("activeMetricRestrictions") if isinstance(restriction, dict) else None
+    )
+    if isinstance(restricted, list) and restricted:
+        parts = []
+        for r in restricted:
+            if not isinstance(r, dict):
+                continue
+            types = r.get("restrictedMetricTypes")
+            kinds = ", ".join(str(x) for x in types) if isinstance(types, list) else ""
+            parts.append(f"{r.get('metricName')}" + (f" ({kinds})" if kinds else ""))
+        notes.append(f"{PLATFORM}: restricted metrics: {'; '.join(parts)}")
+    truncation = meta.get(META_TRUNCATION)
+    if isinstance(truncation, list):
+        seen: list[str] = []
+        for tr in truncation:
+            if isinstance(tr, dict):
+                msg = f"{tr.get('dataTruncationType')} before {tr.get('dataTruncationDate')}"
+                if msg not in seen:
+                    seen.append(msg)
+        if seen:
+            notes.append(f"{PLATFORM}: data truncated: {'; '.join(seen)}")
+    return notes
