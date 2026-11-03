@@ -171,10 +171,11 @@ def test_target_differing_from_registry_is_refused() -> None:
         quantity_feasibility(B.quantity("ctr"), t)
 
 
-def test_platform_modeled_is_not_a_regime_downgrade() -> None:
+def test_platform_modeled_caps_at_marginal() -> None:
+    """D28 (§5.2 C6) reverses the earlier P4 choice: platform-modeled is a regime mismatch."""
     pm = registries.resolve("phrasing/notices/platform_modeled@v1")
     q = B.quantity("ctr", estimate=B.beta_spec(400, 19600), notices=[pm])
-    assert quantity_feasibility(q, _target()).status == "estimable"
+    assert quantity_feasibility(q, _target()).status == "marginal"
 
 
 def test_run_record_rejects_duplicates_and_replace(_store: Path) -> None:
