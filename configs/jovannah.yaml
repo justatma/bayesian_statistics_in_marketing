@@ -2,5 +2,6 @@
 client_id: jovannah
 timezone: America/New_York
 currency: USD
+economics_path: economics/jovannah.json
 accounts:
   meta: act_1065479012990281

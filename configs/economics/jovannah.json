@@ -1,0 +1,15 @@
+{
+ "economics_id": "jovannah",
+ "client_id": "jovannah",
+ "currency": "USD",
+ "variable_cost_per_order": {"amount": "235.00", "currency": "USD"},
+ "price_source": "fixed",
+ "fixed_price": {"amount": "795.00", "currency": "USD"},
+ "repeat_value": null,
+ "loss_tolerance": {"amount": "150.00", "currency": "USD"},
+ "survival_floor": {"amount": "1500.00", "currency": "USD"},
+ "test_budget": {"amount": "1500.00", "currency": "USD"},
+ "source": "Jo via Atma, 2026-11-07: unit cost $235 all in, price $795, one product; cap $1,500 for November set by Jo; loss tolerance per decision chosen by Atma on Claude's recommendation (client_onboarding/jovannah/6_what_jo_shared_2026-11-07.md)",
+ "approved_by": "Atma Degeyndt",
+ "approved_at": "2026-11-07T17:40:00+00:00"
+}
