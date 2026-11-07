@@ -1,0 +1,6 @@
+# Jovannah (client). No secrets here: the token lives in the keys file as META_ACCESS_TOKEN.
+client_id: jovannah
+timezone: America/New_York
+currency: USD
+accounts:
+  meta: act_1065479012990281

@@ -1,0 +1,15 @@
+{
+ "config": {
+  "client_id": "jovannah",
+  "timezone": "America/Los_Angeles",
+  "currency": "USD",
+  "accounts": {
+   "meta": "act_1065479012990281"
+  },
+  "economics_path": null
+ },
+ "window": [
+  "2026-10-31",
+  "2026-11-06"
+ ]
+}

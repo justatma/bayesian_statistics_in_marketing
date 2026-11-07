@@ -1,0 +1,37 @@
+{
+ "request": {
+  "form": null,
+  "headers": {},
+  "json": null,
+  "method": "GET",
+  "url": "https://graph.facebook.com/v26.0/act_1065479012990281?fields=timezone_name%2Ccurrency&access_token=REDACTED"
+ },
+ "response": {
+  "body": {
+   "currency": "USD",
+   "id": "act_1065479012990281",
+   "timezone_name": "America/New_York"
+  },
+  "headers": {
+   "access-control-allow-origin": "*",
+   "alt-svc": "h3=\":443\"; ma=86400",
+   "cache-control": "private, no-cache, no-store, must-revalidate",
+   "connection": "keep-alive",
+   "content-length": "82",
+   "content-type": "application/json; charset=UTF-8",
+   "date": "Sat, 07 Nov 2026 16:19:02 GMT",
+   "expires": "Sat, 01 Jan 2000 00:00:00 GMT",
+   "facebook-api-version": "v26.0",
+   "pragma": "no-cache",
+   "strict-transport-security": "max-age=15552000; preload",
+   "vary": "Origin",
+   "x-business-use-case-usage": "{\"1065479012990281\":[{\"type\":\"ads_management\",\"call_count\":0,\"total_cputime\":0,\"total_time\":0,\"estimated_time_to_regain_access\":0,\"ads_api_access_tier\":\"development_access\"}]}",
+   "x-fb-connection-quality": "EXCELLENT; q=0.9, rtt=13, rtx=0, c=10, mss=1380, tbw=4560, tp=-1, tpl=-1, uplat=357, ullat=0",
+   "x-fb-debug": "MLxIePzxIl0XDGoTpBmDv7y35RcJs3kT0q+B/Zy5ZbQXGSsh35o4ibgI11LzbRrHK00AUHHixlFmlXp/M2q5wQ==",
+   "x-fb-request-id": "AMqjbXWjtzti4f0qhfIweNx",
+   "x-fb-rev": "1053589433",
+   "x-fb-trace-id": "HgwhMJyrLqn"
+  },
+  "status": 200
+ }
+}
