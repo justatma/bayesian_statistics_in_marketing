@@ -11,3 +11,4 @@ data/generated/
 .ruff_cache/
 .claude/worktrees/
 data/real/
+data/live/

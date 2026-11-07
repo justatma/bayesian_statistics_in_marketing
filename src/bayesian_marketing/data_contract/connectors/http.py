@@ -61,6 +61,8 @@ SECRET_SHAPES = (
     re.compile(r"AIza[0-9A-Za-z_\-]{30,}"),
     re.compile(r"AQ[A-Za-z0-9_\-]{60,}"),
     re.compile(r"(?i)(bearer\s+)(?!redacted)[A-Za-z0-9._\-~+/=]{8,}"),
+    # Live view L2 C3 (build log B1): any access_token= value in free text, e.g. an error message.
+    re.compile(r"(access_token=)(?!REDACTED)[^&\s\"'<>]+"),
 )
 
 # Engineering choices, not in a registry yet (manifest open question): request timeout and the

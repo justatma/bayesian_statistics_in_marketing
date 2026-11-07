@@ -88,6 +88,11 @@ class ClientConfig(Frozen):
     currency: str
     accounts: dict[Platform, str]  # platform -> account id
     economics_path: str | None = None
+    # Live view §3.2 (D41, D43). conversion_event: platform -> action_type the connector counts.
+    # conversion_event_confirmed: False or absent means provisional. priors: path -> prior id (L4).
+    conversion_event: dict[Platform, str] = Field(default_factory=dict)
+    conversion_event_confirmed: dict[Platform, bool] = Field(default_factory=dict)
+    priors: dict[str, str] = Field(default_factory=dict)
 
 
 class NarrativeBlock(Frozen):

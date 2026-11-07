@@ -363,6 +363,94 @@ def demo(scenario: str, out: Path, seed: int, metric: str) -> int:
     return 0
 
 
+LIVE_DIR_ENV = "BAYES_LIVE_DIR"
+
+
+def live_dir() -> Path:
+    """``data/live/`` unless ``BAYES_LIVE_DIR`` names another (spec v0.2 §5 L0)."""
+    return Path(os.environ.get(LIVE_DIR_ENV, REPO / "data" / "live"))
+
+
+def live(args: argparse.Namespace) -> int:
+    """``live poll|serve|prune|refresh``. The only import of ``bayesian_marketing.live`` (§2)."""
+    from bayesian_marketing.live import SystemClock, load_live_registry
+    from bayesian_marketing.live import config as live_config
+    from bayesian_marketing.live.poll import poll
+    from bayesian_marketing.live.prune import prune
+    from bayesian_marketing.live.refresh import refresh
+    from bayesian_marketing.live.serve import serve
+    from bayesian_marketing.live.store import SqliteStore
+
+    base = live_dir()
+    store_path = base / "live.sqlite"
+    record_root = base / "recordings"
+    data_dir = Path(os.environ.get("BAYES_DATA_DIR", base / "engine"))
+    croot = live_config.config_root()
+    registry = load_live_registry()
+    clock = SystemClock()
+    base.mkdir(parents=True, exist_ok=True)
+
+    if args.live_command == "serve":
+        serve(store_path, registry=registry, clock=clock, data_dir=data_dir, config_root=croot)
+        return 0
+
+    store = SqliteStore.open(store_path)
+    try:
+        if args.live_command == "prune":
+            removed = prune(record_root, store, clock, registry.recordings_keep_days)
+            _say("Pruned", f"{len(removed)} recording directories")
+            return 0
+        if args.live_command == "refresh":
+            cfg = live_config.load_client(args.client, croot)
+            last = store.latest_poll(cfg.client_id)
+            if last is None:
+                _say("Refresh", f"{cfg.client_id}: no good poll yet")
+                return 1
+            rr = refresh(cfg, last, store, clock, data_dir=data_dir, config_root=croot)
+            _say(
+                "Refresh",
+                f"{cfg.client_id}: {rr.status}" + (f" ({rr.reason})" if rr.reason else ""),
+            )
+            return 0 if rr.status != "failed" else 1
+        configs = (
+            live_config.all_clients(croot)
+            if args.all
+            else [live_config.load_client(args.client, croot)]
+        )
+        failed = False
+        for cfg in configs:
+            if "meta" not in cfg.accounts:
+                continue
+            last = store.latest_poll(cfg.client_id)
+            if last is not None:
+                age = (clock.now() - last.started_at).total_seconds()
+                if age < registry.interval_seconds:
+                    _say(
+                        "Poll",
+                        f"{cfg.client_id}: early: last good poll {int(age // 60)} minutes ago",
+                    )
+            rec = poll(
+                cfg,
+                store,
+                clock,
+                registry=registry,
+                record_root=record_root if args.record else None,
+            )
+            line = f"{cfg.client_id}: {rec.poll_id} {rec.status}, {rec.n_rows} rows"
+            _say("Poll", line + (f": {rec.error}" if rec.error else ""))
+            if rec.status != "ok":
+                failed = True
+                continue
+            rr = refresh(cfg, rec, store, clock, data_dir=data_dir, config_root=croot)
+            _say(
+                "Refresh",
+                f"{cfg.client_id}: {rr.status}" + (f" ({rr.reason})" if rr.reason else ""),
+            )
+        return 1 if failed else 0
+    finally:
+        store.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m bayesian_marketing.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -375,9 +463,22 @@ def main(argv: list[str] | None = None) -> int:
         default="contribution",
         choices=["ctr", "cvr", "cpa", "roas", "contribution_per_click", "contribution"],
     )
+    lv = sub.add_parser("live", help="the live view: poll, serve, prune, refresh (D41)")
+    lsub = lv.add_subparsers(dest="live_command", required=True)
+    lp = lsub.add_parser("poll", help="read each named client's Meta account once into the store")
+    who = lp.add_mutually_exclusive_group(required=True)
+    who.add_argument("--client")
+    who.add_argument("--all", action="store_true")
+    lp.add_argument("--record", action="store_true", help="keep the redacted exchanges")
+    lsub.add_parser("serve", help="serve the internal page on the loopback address")
+    lsub.add_parser("prune", help="remove recordings older than the registry's keep")
+    lr = lsub.add_parser("refresh", help="rerun the engine refresh on the latest good poll")
+    lr.add_argument("--client", required=True)
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo(args.scenario, args.out, args.seed, args.metric)
+    if args.command == "live":
+        return live(args)
     return 2  # pragma: no cover
 
 

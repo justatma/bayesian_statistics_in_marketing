@@ -1,0 +1,21 @@
+# Live view (spec/Live_View_Specification_v0.2.md §3.4, D41). Owner's rulings of 2026-11-07.
+version: "2026-11-07"
+freshness_date: "2026-11-07"     # informational; staleness of this file blocks nothing
+interval_seconds: 3600           # owner: sixty minutes between reads
+lookback_days: 7                 # each poll re-reads the last 7 account-local days, today included
+stale_after_seconds: 7200        # page banner when the last good poll is older
+recordings_keep_days: 7          # redacted exchanges; rows are kept forever
+page_refresh_seconds: 300        # <meta http-equiv="refresh">
+bind: "127.0.0.1"
+port: 8765
+account_status:                  # Meta ad account codes, all VERIFIED in F2b §4; unknown codes shown raw
+  "1": active
+  "2": disabled
+  "3": unsettled
+  "7": pending risk review
+  "8": pending settlement
+  "9": in grace period
+  "100": pending closure
+  "101": closed
+  "201": any active
+  "202": any closed

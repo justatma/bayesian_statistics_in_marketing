@@ -5,3 +5,7 @@ currency: USD
 economics_path: economics/jovannah.json
 accounts:
   meta: act_1065479012990281
+# Live view §3.2 (D44): the pixel's Lead event, as her account returned it on 2026-11-07.
+# Provisional (no conversion_event_confirmed) until her first signup confirms the label.
+conversion_event:
+  meta: offsite_conversion.fb_pixel_lead

@@ -57,6 +57,7 @@ class Fetched:
     n_elements: int  # data elements the API returned, before any check (C6 empty account)
     notes: list[str] = field(default_factory=list)
     attribution_windows: list[str] = field(default_factory=list)  # requested or default (C4)
+    account: dict[str, str] = field(default_factory=dict)  # live view §3.3: raw account fields
 
 
 def text(v: Any) -> str | None:

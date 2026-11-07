@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Live view page server (spec/Live_View_Specification_v0.2.md §5 L0), loopback only.
+     install.sh fills @REPO@ and installs this in ~/Library/LaunchAgents. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atma.bayes.live_view</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>@REPO@/scripts/live/run_with_keys.sh</string>
+    <string>live</string><string>serve</string>
+  </array>
+  <key>WorkingDirectory</key><string>@REPO@</string>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>@REPO@/data/live/logs/view.log</string>
+  <key>StandardErrorPath</key><string>@REPO@/data/live/logs/view.log</string>
+</dict>
+</plist>

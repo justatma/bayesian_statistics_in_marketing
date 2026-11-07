@@ -4,7 +4,7 @@
   "headers": {},
   "json": null,
   "method": "GET",
-  "url": "https://graph.facebook.com/v26.0/act_2543868002525860/insights?level=ad&time_increment=1&time_range=%7B%22since%22%3A%222026-10-01%22%2C%22until%22%3A%222026-10-07%22%7D&fields=date_start%2Cdate_stop%2Caccount_id%2Ccampaign_id%2Cadset_id%2Cad_id%2Cimpressions%2Cinline_link_clicks%2Cspend%2Caccount_currency%2Cactions%2Caction_values%2Cattribution_setting&access_token=REDACTED"
+  "url": "https://graph.facebook.com/v26.0/act_1065479012990281/insights?level=ad&time_increment=1&time_range=%7B%22since%22%3A%222026-10-01%22%2C%22until%22%3A%222026-10-07%22%7D&fields=date_start%2Cdate_stop%2Caccount_id%2Ccampaign_id%2Cadset_id%2Cad_id%2Cimpressions%2Cinline_link_clicks%2Cspend%2Caccount_currency%2Cactions%2Caction_values%2Cattribution_setting%2Caccount_name%2Ccampaign_name%2Cadset_name%2Cad_name%2Cobjective&access_token=REDACTED"
  },
  "response": {
   "body": {
@@ -17,19 +17,19 @@
    "connection": "keep-alive",
    "content-length": "11",
    "content-type": "application/json; charset=UTF-8",
-   "date": "Tue, 03 Nov 2026 12:48:37 GMT",
+   "date": "Sat, 07 Nov 2026 23:44:57 GMT",
    "expires": "Sat, 01 Jan 2000 00:00:00 GMT",
    "facebook-api-version": "v26.0",
    "pragma": "no-cache",
    "strict-transport-security": "max-age=15552000; preload",
    "vary": "Origin",
-   "x-business-use-case-usage": "{\"2543868002525860\":[{\"type\":\"ads_insights\",\"call_count\":1,\"total_cputime\":1,\"total_time\":1,\"estimated_time_to_regain_access\":0,\"ads_api_access_tier\":\"development_access\"}]}",
+   "x-business-use-case-usage": "{\"1065479012990281\":[{\"type\":\"ads_insights\",\"call_count\":0,\"total_cputime\":0,\"total_time\":0,\"estimated_time_to_regain_access\":0,\"ads_api_access_tier\":\"development_access\"}]}",
    "x-fb-ads-insights-throttle": "{\"app_id_util_pct\":0.01,\"acc_id_util_pct\":0,\"ads_api_access_tier\":\"development_access\"}",
-   "x-fb-connection-quality": "EXCELLENT; q=0.9, rtt=19, rtx=1, c=10, mss=1380, tbw=5781, tp=-1, tpl=-1, uplat=791, ullat=0",
-   "x-fb-debug": "MprCeaLicIPIOkkc0IISqJ1TmNa+QQovryhqS/e0z9nQWKBGLr96z9dRuL7GoQfFPaK/CqOxZGL/wGYfI3sx1A==",
-   "x-fb-request-id": "AWVVG3UIyNq3WpcpTHEdrMW",
-   "x-fb-rev": "1052846864",
-   "x-fb-trace-id": "C805/86BsuB"
+   "x-fb-connection-quality": "EXCELLENT; q=0.9, rtt=12, rtx=0, c=10, mss=1380, tbw=5688, tp=-1, tpl=-1, uplat=682, ullat=0",
+   "x-fb-debug": "UdSy3YOdnOM57Oc9GhgfIa8tIF5iuZwATdoDkwm/ych67hP53jgr4hLgzKAwa3cfzXZiZoW+TiuUe/yRh7iNuw==",
+   "x-fb-request-id": "AWAvDuAnQLhmlUM979IYTdH",
+   "x-fb-rev": "1053604717",
+   "x-fb-trace-id": "FUrjvxQJZsZ"
   },
   "status": 200
  }

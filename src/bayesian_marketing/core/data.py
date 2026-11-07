@@ -75,6 +75,7 @@ class PlatformPull(Frozen):
     notes: list[str] = Field(default_factory=list)  # reader disclosures that are not C5 (D24)
     empty_account: bool = False  # §5.1 C6
     timezone: str | None = None  # account timezone the dates were normalized from (§5.1 C2)
+    account: dict[str, str] = Field(default_factory=dict)  # live view §3.3 (D43): raw, as text
     pulled_at: datetime
     synthetic: bool
 

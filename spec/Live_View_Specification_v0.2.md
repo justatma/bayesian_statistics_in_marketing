@@ -93,6 +93,8 @@ page. The clock is injected (`Clock`, `now() -> datetime`, UTC, tz-aware).
 
 ### 3.1 Insights names and objective
 
+F2b (`spec/facts/F2_meta_live.md`) verified all five fields; `OBJECTIVE_REQUESTED = True`.
+
 `INSIGHT_FIELDS` gains `account_name`, `campaign_name`, `adset_name`, `ad_name`, and `objective` if
 facts pack F2b verifies it [2.1]. Mapping in `_record` [2.2]:
 
@@ -103,6 +105,10 @@ facts pack F2b verifies it [2.1]. Mapping in `_record` [2.2]:
 | `adset_name` | `entity_ids.ad_set_name` |
 | `ad_name` | `entity_ids.ad_name` |
 | `objective` | `objective` |
+
+The pull lands each `entity_ids.<key>_name` target in `PerformanceRow.entity_names[<key>]` with the
+suffix stripped (D34, `data_contract/readers/rows.py` `NAME_SUFFIX`), so `entity_names` has the same
+keys as `entity_ids`: `account`, `campaign`, `ad_set`, `ad` (build log B4).
 
 If F2b cannot verify `objective` on `act_<id>/insights` at `level=ad`, it is not requested,
 `PerformanceRow.objective` stays None, the page shows `objective not read`, and no acceptance test
@@ -349,7 +355,7 @@ and recording tree finds no fake credential value.
 ### L1. Connector widening
 
 §3.1 to §3.3. Checks, `tests/acceptance/test_L1.py`: a fake element with the four names fills
-`entity_names` with `account_name`, `campaign_name`, `ad_set_name`, `ad_name`; with
+`entity_names` with `account`, `campaign`, `ad_set`, `ad` (B4); with
 `OBJECTIVE_REQUESTED`, `objective` is filled; `conversion_event={"meta": "lead"}` over elements
 carrying `lead` and `omni_purchase` gives `conversions_reported` from `lead`, `revenue_reported`
 None, and the note `conversion event lead used`; the same with `lead` absent gives 0.0 and the note

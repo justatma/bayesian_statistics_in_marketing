@@ -34,6 +34,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"bayesian_marketing.live" = ["templates/*.html"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

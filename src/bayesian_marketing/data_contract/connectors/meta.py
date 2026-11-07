@@ -47,12 +47,25 @@ INSIGHT_FIELDS = (
     "actions",
     "action_values",
     "attribution_setting",
+    # Live view §3.1 (D41, D43): names and objective, all VERIFIED on the insights edge in F2b §1-2.
+    # Set by the L0 skeleton (build log B2); mapping them into the row is L1.
+    "account_name",
+    "campaign_name",
+    "adset_name",
+    "ad_name",
+    "objective",
 )
-ACCOUNT_FIELDS = ("timezone_name", "currency")
-# Names and objective (D34) are not requested yet: adding account_name, campaign_name, adset_name,
-# ad_name (F2 §2) to INSIGHT_FIELDS changes the recorded insights URL that the frozen
-# meta_empty replay matches, and F2 lists no objective or optimization-goal field. entity_names
-# stay empty and objective None until the recordings are re-made (manifest D34 open questions).
+OBJECTIVE_REQUESTED = True  # F2b §2: objective VERIFIED as an insights field
+# Live view §3.3: name, account_status, spend_cap, amount_spent VERIFIED on the ad account node
+# (F2b §3). spend_cap is in minor units (VERIFIED); amount_spent INFERRED the same.
+ACCOUNT_FIELDS = (
+    "timezone_name",
+    "currency",
+    "name",
+    "account_status",
+    "spend_cap",
+    "amount_spent",
+)
 # Purchase action types F2 §3 lists, in order of preference. Families overlap (omni_purchase rolls
 # up pixel, app and onsite purchases), so one type is chosen per pull and never summed: the first
 # in this order that appears anywhere in the pull. Which the owner's pixel reports: F2 open q. 6.

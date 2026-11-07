@@ -158,6 +158,16 @@ def _not_knowable(q: Quantity, phr: dict[str, Any]) -> dict[str, Any]:
     return {"text": _fill(phr["not_knowable_block"], slots), "notices": list(q.notices)}
 
 
+def finding_lines(q: Quantity, phrasing: dict[str, Any]) -> dict[str, Any]:
+    """The report's words for one quantity, for the live view (§5 L3 C6). Same as the report."""
+    return _finding(q, phrasing)
+
+
+def not_knowable_lines(q: Quantity, phrasing: dict[str, Any]) -> dict[str, Any]:
+    """The report's not-knowable block for one quantity, for the live view (§5 L3 C6)."""
+    return _not_knowable(q, phrasing)
+
+
 def _horizon(r: Recommendation) -> str:
     return f"{V.fmt_count(float(r.horizon.amount))} {r.horizon.unit}"
 

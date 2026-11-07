@@ -4,36 +4,37 @@
   "headers": {},
   "json": null,
   "method": "GET",
-  "url": "https://graph.facebook.com/v26.0/act_2543868002525860?fields=timezone_name%2Ccurrency&access_token=REDACTED"
+  "url": "https://graph.facebook.com/v26.0/act_1065479012990281?fields=timezone_name%2Ccurrency%2Cname%2Caccount_status%2Cspend_cap%2Camount_spent&access_token=REDACTED"
  },
  "response": {
   "body": {
+   "account_status": 1,
+   "amount_spent": "3674",
    "currency": "USD",
-   "id": "act_2543868002525860",
+   "id": "act_1065479012990281",
+   "name": "Jovannah",
+   "spend_cap": "150000",
    "timezone_name": "America/New_York"
   },
   "headers": {
+   "access-control-allow-origin": "*",
    "alt-svc": "h3=\":443\"; ma=86400",
    "cache-control": "private, no-cache, no-store, must-revalidate",
    "connection": "keep-alive",
-   "content-encoding": "gzip",
-   "content-security-policy": "frame-ancestors 'none'",
-   "content-type": "application/json; charset=utf-8",
-   "date": "Tue, 03 Nov 2026 12:48:36 GMT",
+   "content-length": "162",
+   "content-type": "application/json; charset=UTF-8",
+   "date": "Sat, 07 Nov 2026 23:44:56 GMT",
    "expires": "Sat, 01 Jan 2000 00:00:00 GMT",
    "facebook-api-version": "v26.0",
    "pragma": "no-cache",
    "strict-transport-security": "max-age=15552000; preload",
-   "transfer-encoding": "chunked",
-   "vary": "Accept-Encoding",
-   "x-business-use-case-usage": "{\"2543868002525860\":[{\"type\":\"ads_management\",\"call_count\":1,\"total_cputime\":1,\"total_time\":1,\"estimated_time_to_regain_access\":0,\"ads_api_access_tier\":\"development_access\"}]}",
-   "x-content-type-options": "nosniff",
-   "x-fb-connection-quality": "EXCELLENT; q=0.9, rtt=11, rtx=0, c=10, mss=1380, tbw=4561, tp=-1, tpl=-1, uplat=264, ullat=0",
-   "x-fb-debug": "VfRt907I6c2fT7SsTXEZNEhqueyB/4DTGIjQxmGkjM1WhuKDnKi0VrO1cistHEvRuV/yNgKwHfFYOsebqTZVPA==",
-   "x-fb-request-id": "AZWsHgHuJUEAmEApfnyeSgM",
-   "x-fb-rev": "1052846864",
-   "x-fb-trace-id": "C624M1IsPll",
-   "x-frame-options": "DENY"
+   "vary": "Origin",
+   "x-business-use-case-usage": "{\"1065479012990281\":[{\"type\":\"ads_management\",\"call_count\":0,\"total_cputime\":0,\"total_time\":0,\"estimated_time_to_regain_access\":0,\"ads_api_access_tier\":\"development_access\"}]}",
+   "x-fb-connection-quality": "EXCELLENT; q=0.9, rtt=12, rtx=0, c=10, mss=1380, tbw=4561, tp=-1, tpl=-1, uplat=528, ullat=0",
+   "x-fb-debug": "StuNZSg47kumT2MIyxMm4iHY8dHJvWLNNlhtdOVPUfeEtWPV3M0DycPdBFauizBYquE/X0s57VOyh9I7GoImNA==",
+   "x-fb-request-id": "AjXpnBQuVz4Z5asVVqHgnj-",
+   "x-fb-rev": "1053610589",
+   "x-fb-trace-id": "HuSF1VL9LLt"
   },
   "status": 200
  }

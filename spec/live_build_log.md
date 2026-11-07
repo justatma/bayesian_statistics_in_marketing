@@ -1,0 +1,14 @@
+# Live view build: decision log
+
+Deviations from `spec/Live_View_Specification_v0.2.md`, written before the code that makes them
+(build protocol item 10). Newest last.
+
+| # | Date | Spec says | Build does | Reason |
+|---|---|---|---|---|
+| B1 | 2026-11-07 | §4: new `http.redact_text(s, secrets)` | Keeps the existing `http.redact_text(text)`, which already blanks every `CREDENTIAL_ENV` value present in the environment and the token shapes, and adds one pattern to `SECRET_SHAPES`: `access_token=` followed by anything but `REDACTED`. `poll` calls it on the error text. | A second function with the same name and a different signature would split redaction in two. The added pattern only redacts more; recorded URLs already carry `access_token=REDACTED`. |
+| B2 | 2026-11-07 | §1: L1 owns `meta.py` | L0 sets the field-list constants in `meta.py` (`INSIGHT_FIELDS`, `ACCOUNT_FIELDS`, `OBJECTIVE_REQUESTED`) from facts pack F2b; L1 owns everything else in the file (`_record` mapping, `conversion_type`, `Fetched.account`). | The re-recording (§3.5) must run after L0 and before the acceptance tests, and it needs the new URLs. The field lists are interface facts, so they belong with the contract. |
+| B3 | 2026-11-07 | §2, [2.15]: `phrasing.yaml` version bumped | Version stays `v1`; `status_labels` and `live` are added keys only. | Seven call sites pin `phrasing/...@v1` (cli, derive, router, fallback, lag, p4 tests). A bump breaks all of them while no existing value changes. |
+| B4 | 2026-11-07 | §3.1 and L1 check: `entity_names` keys `account_name`, `campaign_name`, `ad_set_name`, `ad_name` | Keys `account`, `campaign`, `ad_set`, `ad`; spec text corrected in place. | Spec error. D34 lands `entity_ids.<key>_name` in `entity_names[<key>]` with the suffix stripped (`readers/rows.py` `NAME_SUFFIX`; `tests/unit/d34`), same keys as `entity_ids`. |
+| B5 | 2026-11-07 | §5 L3 phrasing block | Adds `period_today`, `period_yesterday`, `period_7d`, `purchases` to the `live` block. | The column-group labels and the default event name are page strings too; C7 wants every page string in the registry. |
+| B6 | 2026-11-07 | facts pack F2b | Filed as `spec/facts/F2_meta_live.md` (still called F2b in prose). | `test_P8_fields_in_facts_pack` reads `F2_meta*.md`; the new field names must be found there. |
+| B7 | 2026-11-07 | §3.5: re-make `meta_empty` and `meta_jovannah_7d` | Also records `data/recordings/meta/` (same window as `meta_jovannah_7d`, its own recording session). | `test_P8_meta_replay_parses` reads `data/recordings/meta/`, which never existed (one of the four P8 failures before this build). Jovannah's account now has spend, so it can be recorded. |

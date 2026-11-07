@@ -180,6 +180,7 @@ def pull(platform: Platform, config: ClientConfig, window: tuple[date, date]) ->
         notes=notes,
         empty_account=fetched.n_elements == 0,
         timezone=fetched.timezone,
+        account=dict(fetched.account),
         pulled_at=pulled_at,
         synthetic=False,
     )

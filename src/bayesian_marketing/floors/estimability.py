@@ -6,6 +6,10 @@ section of ``bounds.yaml`` is never read here (C3, D1).
 
 from __future__ import annotations
 
+import math
+from statistics import NormalDist
+from typing import Literal
+
 from bayesian_marketing.core import (
     ClientEconomics,
     Comparison,
@@ -66,6 +70,20 @@ def registry_target() -> PrecisionTarget:
         level=float(pw["level"]),
         caveat_rel_half_width=float(pw["caveat_rel_half_width"]),
     )
+
+
+def event_floor(status: Literal["marginal", "estimable"]) -> int:
+    """Events a rate needs before its interval reaches ``status`` (live view §5 L3 C5, D43).
+
+    ``ceil((z / w)^2)``: z the two-sided normal quantile at the registry's level, w the registry's
+    relative half-width for the status (``caveat_rel_half_width`` for marginal, ``rel_half_width``
+    for estimable). Uses the large-count approximation relative half-width ~ z / sqrt(events).
+    A count against this floor is not a posterior.
+    """
+    t = registry_target()
+    w = {"marginal": t.caveat_rel_half_width, "estimable": t.rel_half_width}[status]
+    z = NormalDist().inv_cdf(0.5 + t.level / 2)
+    return math.ceil((z / w) ** 2)
 
 
 def quantity_feasibility(q: Quantity, target: PrecisionTarget) -> Feasibility:

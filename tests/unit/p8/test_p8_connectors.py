@@ -18,13 +18,13 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 from tests.acceptance.test_P8 import SECRET_KEYS, SECRET_PATTERNS
+from tests.fakes.meta_api import META_ROWS, META_TOKEN, _json, _meta_row, meta_handler
 
 from bayesian_marketing import core as C
 from bayesian_marketing.data_contract.connectors import http as H
 from bayesian_marketing.data_contract.connectors.pull import pull
 
 WINDOW = (dt.date(2026, 10, 1), dt.date(2026, 10, 2))
-META_TOKEN = "EAA" + "b" * 40
 GOOGLE_ACCESS = "ya29." + "c" * 40
 GOOGLE_REFRESH = "1//" + "d" * 40
 GOOGLE_SECRET = "GOCSPX-" + "e" * 20
@@ -43,10 +43,6 @@ CONFIG = C.ClientConfig(
 
 Handler = Callable[[httpx.Request], httpx.Response]
 REAL_CLIENT = httpx.Client
-
-
-def _json(body: Any, status: int = 200) -> httpx.Response:
-    return httpx.Response(status, json=body, headers={"x-app-usage": '{"call_count":1}'})
 
 
 @pytest.fixture
@@ -144,71 +140,6 @@ def _assert_no_secrets(d: Path) -> None:
 
 
 # --------------------------------------------------------------------------- Meta (F2)
-
-
-def _meta_row(ad: str, day: str, **kw: Any) -> dict[str, Any]:
-    row = {
-        "date_start": day,
-        "date_stop": day,
-        "account_id": "111",
-        "campaign_id": "c1",
-        "adset_id": "s1",
-        "ad_id": ad,
-        "impressions": "1000",
-        "inline_link_clicks": "40",
-        "spend": "25.50",
-        "account_currency": "USD",
-        "actions": [
-            {"action_type": "link_click", "value": "40"},
-            {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "3"},
-        ],
-        "action_values": [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "90"}],
-        "attribution_setting": "7d_click_1d_view",
-    }
-    row.update(kw)
-    return row
-
-
-def meta_handler(
-    rows: list[dict[str, Any]], *, fail_first: dict[str, Any] | None = None
-) -> Handler:
-    state = {"failed": False}
-
-    def handle(req: httpx.Request) -> httpx.Response:
-        url = urlsplit(str(req.url))
-        q = parse_qs(url.query)
-        assert q["access_token"] == [META_TOKEN]
-        if url.path == "/v26.0/act_111":
-            assert q["fields"] == ["timezone_name,currency"]
-            return _json({"timezone_name": "America/Los_Angeles", "currency": "USD"})
-        assert url.path == "/v26.0/act_111/insights"
-        if fail_first is not None and not state["failed"]:
-            state["failed"] = True
-            return _json({"error": fail_first}, 400)
-        tr = json.loads(q["time_range"][0]) if "time_range" in q else None
-        if "after" not in q:
-            assert q["level"] == ["ad"] and q["time_increment"] == ["1"]
-            page = [r for r in rows if tr["since"] <= r["date_start"] <= tr["until"]]
-            if not page:
-                return _json({"data": []})
-            nxt = f"https://graph.facebook.com/v26.0/act_111/insights?access_token={META_TOKEN}"
-            nxt += f"&after=CUR1&since={tr['since']}"
-            return _json({"data": page[:1], "paging": {"cursors": {"after": "CUR1"}, "next": nxt}})
-        since = q["since"][0]
-        page = [r for r in rows if r["date_start"] >= since][1:]
-        if q["after"] == ["CUR1"]:  # an empty page that still carries next (F2 §5)
-            nxt = f"https://graph.facebook.com/v26.0/act_111/insights?access_token={META_TOKEN}"
-            return _json({"data": [], "paging": {"next": nxt + f"&after=CUR2&since={since}"}})
-        return _json({"data": page, "paging": {"cursors": {"before": "CUR2"}}})
-
-    return handle
-
-
-META_ROWS = [
-    _meta_row("a1", "2026-10-01"),
-    _meta_row("a2", "2026-10-01", actions=None, action_values=None),
-    _meta_row("a1", "2026-10-02"),
-]
 
 
 def test_meta_record_then_replay(
