@@ -1,1 +1,125 @@
-{# Live view client page (spec v0.2 §5 L3). Piece L3 writes it. #}
+{# Live view client page (spec v0.2 §5 L3). Every string arrives from the registries through view.py.
+   The floors column has no heading: live_columns.event_floor names the status words, which the
+   frozen budget test forbids beside a different word (manifest L3, open question 5). #}
+{% macro entity_cells(entities) %}
+{% for e in entities %}<td>{% if e.name %}{{ e.name }} {% endif %}<code>{{ e.id }}</code></td>{% endfor %}
+{% endmacro %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="{{ refresh }}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+</head>
+<body style="font-family: system-ui, sans-serif; margin: 1rem; color: #1a1a1a; background: #fff">
+<header>
+<h1>{{ title }}</h1>
+{% for b in banners %}
+<p class="banner" style="background: #fde8e8; border-left: 4px solid #b42318; padding: 0.4rem 0.6rem">{{ b }}</p>
+{% endfor %}
+{% if no_poll %}
+<p>{{ no_poll }}</p>
+{% endif %}
+{% if header %}
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+{% for k, v in header %}
+<tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+</header>
+{% if poll %}
+<main>
+<h2>{{ live.h_account }}</h2>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+{% for k, v in poll.account %}
+<tr><th>{{ k }}</th><td class="n">{{ v }}</td></tr>
+{% endfor %}
+</table>
+
+<h2>{{ live.h_delivery }}</h2>
+<p>{{ poll.evidence_delivery }}</p>
+<p>{{ poll.platform_count }}</p>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead>
+<tr><th colspan="{{ poll.levels|length + 1 }}"></th>{% for p in poll.periods %}<th colspan="5">{{ p }}</th>{% endfor %}</tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}<th>{{ cols.objective }}</th>{% for p in poll.periods %}<th>{{ cols.impressions }}</th><th>{{ cols.clicks }}</th><th>{{ cols.spend }}</th><th>{{ cols.ctr }}</th><th>{{ cols.cpc }}</th>{% endfor %}</tr>
+</thead>
+<tbody>
+{% for row in poll.delivery %}
+<tr>{{ entity_cells(row.entities) }}<td>{{ row.objective }}</td>{% for g in row.groups %}{% for c in g %}<td class="n">{{ c }}</td>{% endfor %}{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>{{ live.h_conversions }}</h2>
+<p>{{ poll.evidence_conversions }}</p>
+<p>{{ poll.platform_count }}</p>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead>
+<tr><th colspan="{{ poll.levels|length }}">{{ poll.event_label }}</th>{% for p in poll.periods %}<th colspan="2">{{ p }}</th>{% endfor %}<th></th></tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for p in poll.periods %}<th>{{ cols.conversions_reported }}</th><th>{{ cols.cost_per_conversion }}</th>{% endfor %}<th>{{ cols.attribution_window }}</th></tr>
+</thead>
+<tbody>
+{% for row in poll.conversions %}
+<tr>{{ entity_cells(row.entities) }}{% for g in row.groups %}{% for c in g %}<td class="n">{{ c }}</td>{% endfor %}{% endfor %}<td>{{ row.window }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% for n in poll.conversion_notes %}
+<p>{{ n }}</p>
+{% endfor %}
+
+<h2>{{ live.h_budget }}</h2>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead>
+<tr><th colspan="{{ poll.levels|length }}">{{ poll.periods[2] }}</th><th colspan="3">{{ cols.clicks }}</th><th colspan="3">{{ poll.event_label }}</th></tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for _ in range(2) %}<th>{{ cols.count }}</th><th></th><th>{{ cols.status }}</th>{% endfor %}</tr>
+</thead>
+<tbody>
+{% for row in poll.budget %}
+<tr>{{ entity_cells(row.entities) }}{% for c in row.clicks %}<td class="n">{{ c }}</td>{% endfor %}{% for c in row.conversions %}<td class="n">{{ c }}</td>{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>{{ live.h_engine }}</h2>
+{% set engine = poll.engine %}
+{% if engine.sentence %}
+<p>{{ engine.sentence }}</p>
+{% else %}
+{% if engine.findings %}
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead><tr>{% for k in poll.finding_keys %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+<tbody>
+{% for f in engine.findings %}
+<tr>{% for c in f.cells %}<td>{{ c }}</td>{% endfor %}</tr>
+{% if f.caveat or f.notices %}
+<tr><td colspan="{{ poll.finding_keys|length }}">{% if f.caveat %}{{ f.caveat }}{% endif %}{% for n in f.notices %} {{ n }}{% endfor %}</td></tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% for nk in engine.not_knowable %}
+<p>{{ nk.text }}{% for n in nk.notices %} {{ n }}{% endfor %}</p>
+{% endfor %}
+{% if engine.diag.none %}
+<p>{{ engine.diag.none }}</p>
+{% else %}
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead><tr>{% for k in poll.diag_keys %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+<tbody>
+{% for r in engine.diag.rows %}
+<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% endif %}
+</main>
+{% endif %}
+<footer style="margin-top: 2rem; color: #555"><p>{{ watermark }}</p></footer>
+</body>
+</html>

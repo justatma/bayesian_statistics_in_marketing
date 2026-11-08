@@ -1,1 +1,22 @@
-{# Live view index page (spec v0.2 §5 L3 C8). Piece L3 writes it. #}
+{# Live view index page (spec v0.2 §5 L3 C8). Every string arrives from the registries through view.py. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="{{ refresh }}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family: system-ui, sans-serif; margin: 1rem; color: #1a1a1a; background: #fff">
+<main>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead><tr><th>{{ cols.client_id }}</th><th>{{ cols.last_good_poll }}</th></tr></thead>
+<tbody>
+{% for e in entries %}
+<tr><td><a href="{{ e.href }}">{{ e.client_id }}</a></td><td>{{ e.last }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</main>
+<footer style="margin-top: 2rem; color: #555"><p>{{ watermark }}</p></footer>
+</body>
+</html>
