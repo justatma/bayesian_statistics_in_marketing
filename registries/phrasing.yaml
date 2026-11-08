@@ -21,6 +21,7 @@ watermark:
 rounding:
   percent_decimals: 1
   money_decimals: 0
+  unit_money_decimals: 2  # live view: CPC and cost per conversion (build log B8)
   probability_decimals: 2
 causal_lexicon:  # D29, D31: stems match every inflection; a hit counts only when an option is its subject or object in the clause
   plain: [cause, drive, drove, generate, lift, boost, increase, raise, produce, improve, impact, trigger,

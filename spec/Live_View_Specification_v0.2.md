@@ -417,11 +417,14 @@ status_labels:
   denominator shows `none yet`. The CTR cell reads `{pct}% ({clicks} / {impressions})`. Above the
   table, once: `evidence_plain.delivery`, then `platform_count` (D42). Objective per campaign, or
   `objective_missing`.
+- Unit costs (CPC, cost per conversion) round to `rounding.unit_money_decimals` (2); totals to
+  `money_decimals` (0). Counts are plain digits, as `2.0% (20 / 1000)` shows (B8).
 - C4. Conversions (h2 `h_conversions`): same rows; the event name (or `purchases` when none is set)
   with `provisional` when not confirmed; count and cost per conversion (spend / count, `none yet`
   at zero, `not reported` when the count is None) per period; the rows' `attribution_window`.
   Above the table, once: `evidence_plain.platform_attributed`, then `platform_count`. Under it:
-  `event_not_seen` when the poll's note says so; `lead_sentence` for a lead event; `not_shown`
+  `event_not_seen` when an event is configured, the poll has rows, and their conversion counts
+  sum to 0 (Meta omits an action that did not occur, so 0 everywhere is "not seen"; B8); `lead_sentence` for a lead event; `not_shown`
   always [1.1].
 - C5. Information budget (h2 `h_budget`): per ad, clicks against `event_floor("marginal")` and
   `event_floor("estimable")` (17 and 68 at the current registry: `ceil((z/w)^2)`, z the two-sided
