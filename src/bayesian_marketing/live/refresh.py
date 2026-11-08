@@ -45,6 +45,17 @@ def refresh(
     refresh_id = (
         "lv_" + hashlib.sha256(f"{poll_rec.poll_id}|{at.isoformat()}".encode()).hexdigest()[:8]
     )
+    if poll_rec.status != "ok":
+        # B12: no engine run and nothing stored after an error or interrupted poll (C3)
+        return RefreshRecord(
+            refresh_id=refresh_id,
+            poll_id=poll_rec.poll_id,
+            client_id=poll_rec.client_id,
+            at=at,
+            status="skipped",
+            reason=f"poll {poll_rec.poll_id} is {poll_rec.status}; no engine run",
+            run_id=None,
+        )
     status, reason, run_id = _outcome(config, poll_rec, store, data_dir, config_root)
     rec = RefreshRecord(
         refresh_id=refresh_id,
@@ -92,7 +103,8 @@ def _outcome(
 
 
 def _gate_text(exc: GateFailure) -> str:
-    return str(exc.args[0]) if exc.args else str(exc)
+    """C2: the gate's reasons joined with "; ", from the GateResult the exception carries."""
+    return "; ".join(str(r) for r in exc.result.reasons)
 
 
 @contextmanager
