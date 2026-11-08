@@ -1,15 +1,17 @@
 """The internal page, rendered from the store on each request (spec v0.2 §5 L3 C1-C7). Piece L3.
 
 Every sentence on the page comes from ``phrasing.yaml`` (the ``live`` block, ``status_labels``,
-``evidence_plain``, ``watermark``) or from the reporting helpers. Column headings are the field
-names of the records they show (``impressions``, ``clicks``, ``spend``) or the metric keys of the
-core (``ctr``, ``cpc``); the registry has no heading strings (manifest L3, open question 1).
+``evidence_plain``, ``watermark``) or from the reporting helpers. Table and header labels come
+from ``live_columns`` (B13). The engine table keeps the ``finding_lines`` and
+``DiagnosticsReport`` keys as headings; ``live_columns`` has none for them (manifest L3).
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import threading
+import urllib.parse
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -32,6 +34,8 @@ from bayesian_marketing.reporting.render import finding_lines, not_knowable_line
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 DATA_ENV = "BAYES_DATA_DIR"
 LEVELS = ("campaign", "ad_set", "ad")
+# The server is threaded and BAYES_DATA_DIR is process-wide: one lock spans set, load, restore (F4).
+_ENV_LOCK = threading.Lock()
 
 # ISO 4217 minor-unit exponents (facts pack L3): 2 unless listed here.
 _EXPONENT_0 = frozenset(
@@ -102,8 +106,11 @@ class Fmt:
 
 
 def plain_count(x: float) -> str:
-    """Counts as plain digits (B8). Meta may report fractional conversions; those keep one place."""
-    return str(int(x)) if float(x).is_integer() else f"{x:.1f}"
+    """Counts as plain digits (B8). A fractional count (Meta may report one) prints in full, the
+    shortest text that reads back as the same float, so the number shown is the number compared
+    against the floors (review F3): 16.96 never prints as 17."""
+    x = float(x)
+    return str(int(x)) if x.is_integer() else repr(x)
 
 
 def fmt_utc(t: datetime) -> str:
@@ -137,9 +144,16 @@ class Sums:
     clicks: int = 0
     spend: Decimal = Decimal(0)
     conversions: float = 0.0
+    n_rows: int = 0
     any_reported: bool = False
 
+    @property
+    def not_reported(self) -> bool:
+        """The period has rows and none of them carries a conversion count (review F1, F2)."""
+        return self.n_rows > 0 and not self.any_reported
+
     def add(self, r: LiveRow) -> None:
+        self.n_rows += 1
         self.impressions += r.impressions
         self.clicks += r.clicks
         self.spend += r.spend.amount
@@ -155,7 +169,6 @@ class Ad:
     objective: str | None
     windows: set[str] = field(default_factory=set)
     periods: dict[str, Sums] = field(default_factory=dict)
-    reported: bool = False  # some row of this ad carries a conversion count
 
     def entity_cells(self) -> list[dict[str, str]]:
         out = []
@@ -192,7 +205,6 @@ def _ads(rows: Iterable[LiveRow], periods: dict[str, tuple[date, date]]) -> list
         elif ad.objective is None and r.objective:
             ad.objective = r.objective
         ad.windows.add(r.attribution_window)
-        ad.reported = ad.reported or r.conversions_reported is not None
         for p, (lo, hi) in periods.items():
             if lo <= r.date <= hi:
                 ad.periods[p].add(r)
@@ -268,7 +280,7 @@ def _conversions(ads: list[Ad], fmt: Fmt, live: dict[str, str]) -> list[dict[str
     for ad in ads:
         groups = []
         for s in ad.periods.values():
-            if not ad.reported:
+            if s.not_reported:
                 groups.append([live["not_reported"], live["not_reported"]])
             elif s.conversions == 0:
                 groups.append([plain_count(0), live["none_yet"]])
@@ -300,10 +312,10 @@ def _budget(
     out = []
     for ad in ads:
         s = ad.periods["period_7d"]
-        if ad.reported:
-            conv = [plain_count(s.conversions), floors, budget_word(s.conversions, labels)]
-        else:
+        if s.not_reported:
             conv = [live["not_reported"], floors, ""]
+        else:
+            conv = [plain_count(s.conversions), floors, budget_word(s.conversions, labels)]
         out.append(
             {
                 "entities": ad.entity_cells(),
@@ -342,7 +354,7 @@ def _engine(
         engine["sentence"] = live["engine_failed"].format(reason=rec.reason or "")
         return engine
     try:
-        with data_dir_env(data_dir):
+        with _ENV_LOCK, data_dir_env(data_dir):
             snap = pipeline.load_snapshot(rec.run_id)
     except (KeyError, ValueError, OSError) as e:
         engine["sentence"] = live["engine_failed"].format(reason=str(e).strip("'\""))
@@ -391,6 +403,7 @@ def render(
     config: ClientConfig,
 ) -> str:
     live: dict[str, str] = phrasing["live"]
+    cols: dict[str, str] = phrasing["live_columns"]
     labels: dict[str, str] = phrasing["status_labels"]
     evidence: dict[str, str] = phrasing["evidence_plain"]
     rounding = {k: int(v) for k, v in phrasing["rounding"].items()}
@@ -401,6 +414,7 @@ def render(
         "refresh": registry.page_refresh_seconds,
         "watermark": phrasing["watermark"]["internal"],
         "live": live,
+        "cols": cols,
         "banners": _banners(store, client_id, last_ok, now, registry, live),
         "header": [],
         "poll": None,
@@ -416,15 +430,16 @@ def render(
     currency = last_ok.currency or config.currency
     fmt = Fmt(rounding=rounding, currency=currency)
     nxt = last_ok.started_at + timedelta(seconds=registry.interval_seconds)
-    ctx["header"] = [
+    header = [
         ("platform", last_ok.platform),
         ("account", " ".join(x for x in (last_ok.account.get("name"), last_ok.account_id) if x)),
         ("timezone", tz),
         ("currency", currency),
-        ("started_at", f"{fmt_utc(last_ok.started_at)} UTC"),
-        ("started_at", f"{fmt_local(last_ok.started_at, tz)} {tz}"),
-        ("started_at + interval_seconds", f"{fmt_utc(nxt)} UTC"),
+        ("last_good_poll", f"{fmt_utc(last_ok.started_at)} UTC"),
+        ("last_good_poll", f"{fmt_local(last_ok.started_at, tz)} {tz}"),
+        ("next_expected", f"{fmt_utc(nxt)} UTC"),
     ]  # fmt: skip
+    ctx["header"] = [(cols[k], v) for k, v in header]
 
     platform = last_ok.platform
     today = now.astimezone(ZoneInfo(tz)).date()
@@ -446,7 +461,7 @@ def render(
 
     floors, budget = _budget(ads, live, labels)
     ctx["poll"] = {
-        "account": _account(last_ok, fmt, registry, live),
+        "account": [(cols[k], v) for k, v in _account(last_ok, fmt, registry, live)],
         "periods": [live[p] for p in periods],
         "evidence_delivery": evidence["delivery"],
         "evidence_conversions": evidence["platform_attributed"],
@@ -474,7 +489,7 @@ def render_index(store: Store, clock: Clock, *, registry: LiveRegistry) -> str:
         entries.append(
             {
                 "client_id": client_id,
-                "href": f"/client/{client_id}",
+                "href": "/client/" + urllib.parse.quote(client_id, safe=""),
                 "last": f"{fmt_utc(last.started_at)} UTC" if last else live["none_yet"],
             }
         )
@@ -483,6 +498,7 @@ def render_index(store: Store, clock: Clock, *, registry: LiveRegistry) -> str:
         .get_template("index.html")
         .render(
             entries=entries,
+            cols=phrasing["live_columns"],
             refresh=registry.page_refresh_seconds,
             watermark=phrasing["watermark"]["internal"],
         )

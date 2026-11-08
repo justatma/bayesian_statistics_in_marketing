@@ -9,7 +9,7 @@
 <body style="font-family: system-ui, sans-serif; margin: 1rem; color: #1a1a1a; background: #fff">
 <main>
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
-<thead><tr><th>client_id</th><th>started_at</th></tr></thead>
+<thead><tr><th>{{ cols.client_id }}</th><th>{{ cols.last_good_poll }}</th></tr></thead>
 <tbody>
 {% for e in entries %}
 <tr><td><a href="{{ e.href }}">{{ e.client_id }}</a></td><td>{{ e.last }}</td></tr>

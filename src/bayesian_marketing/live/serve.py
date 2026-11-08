@@ -13,6 +13,7 @@ import signal
 import sys
 import threading
 import time
+import urllib.parse
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -69,7 +70,10 @@ def _handler(
             return health
         parts = path.split("/")
         if len(parts) == 3 and parts[1] == "client" and parts[2]:
-            return lambda store: client(store, parts[2])
+            # The index percent-encodes ids (review F5); a decoded id with a slash is no client.
+            cid = urllib.parse.unquote(parts[2])
+            if cid and "/" not in cid:
+                return lambda store: client(store, cid)
         return None
 
     class Handler(BaseHTTPRequestHandler):
@@ -77,23 +81,25 @@ def _handler(
         sys_version = ""
 
         def _path(self) -> str:
-            return self.path.split("?", 1)[0].split("#", 1)[0]
+            raw = getattr(self, "path", "") or ""
+            return raw.split("?", 1)[0].split("#", 1)[0]
 
-        def _send(self, status: int, ctype: str, body: bytes, t0: float) -> None:
-            self.send_response(status)
+        def handle_one_request(self) -> None:
+            self._t0 = time.perf_counter()
+            super().handle_one_request()
+
+        def _send(self, status: int, ctype: str, body: bytes) -> None:
+            self.send_response(status)  # prints the request line through log_request
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
-            ms = (time.perf_counter() - t0) * 1000
-            print(f"{self.command} {self._path()} {status} {ms:.1f}ms", file=sys.stdout, flush=True)
 
         def do_GET(self) -> None:
-            t0 = time.perf_counter()
             fn = route(self._path())
             if fn is None:
-                self._send(404, HTML, b"", t0)
+                self._send(404, HTML, b"")
                 return
             try:
                 store = SqliteStore.open(store_path, read_only=True)
@@ -104,10 +110,10 @@ def _handler(
             except Exception as e:
                 print(f"error {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 status, ctype, body = 500, HTML, b""
-            self._send(status, ctype, body, t0)
+            self._send(status, ctype, body)
 
         def _not_allowed(self) -> None:
-            self._send(405, HTML, b"", time.perf_counter())
+            self._send(405, HTML, b"")
 
         def __getattr__(self, name: str) -> Any:
             # BaseHTTPRequestHandler looks up do_<METHOD>; every method but GET is 405.
@@ -116,10 +122,18 @@ def _handler(
             raise AttributeError(name)
 
         def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
-            pass  # _send prints the one line per request
+            # send_response calls this once per request, for our replies and for the ones the
+            # stdlib refuses itself through send_error (400, 414, 505): one line each (review F6).
+            t0 = getattr(self, "_t0", None)
+            ms = 0.0 if t0 is None else (time.perf_counter() - t0) * 1000
+            status = getattr(code, "value", code)
+            method = getattr(self, "command", "") or "-"
+            print(
+                f"{method} {self._path() or '-'} {status} {ms:.1f}ms", file=sys.stdout, flush=True
+            )
 
         def log_message(self, format: str, *args: Any) -> None:
-            pass  # the default writes to stderr; the request line is printed by _send
+            pass  # the default writes to stderr; log_request prints the one stdout line
 
     return Handler
 

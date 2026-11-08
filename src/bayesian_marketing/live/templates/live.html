@@ -1,4 +1,6 @@
-{# Live view client page (spec v0.2 §5 L3). Every string arrives from the registries through view.py. #}
+{# Live view client page (spec v0.2 §5 L3). Every string arrives from the registries through view.py.
+   The floors column has no heading: live_columns.event_floor names the status words, which the
+   frozen budget test forbids beside a different word (manifest L3, open question 5). #}
 {% macro entity_cells(entities) %}
 {% for e in entities %}<td>{% if e.name %}{{ e.name }} {% endif %}<code>{{ e.id }}</code></td>{% endfor %}
 {% endmacro %}
@@ -42,7 +44,7 @@
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
 <thead>
 <tr><th colspan="{{ poll.levels|length + 1 }}"></th>{% for p in poll.periods %}<th colspan="5">{{ p }}</th>{% endfor %}</tr>
-<tr>{% for l in poll.levels %}<th>{{ l }}</th>{% endfor %}<th>objective</th>{% for p in poll.periods %}<th>impressions</th><th>clicks</th><th>spend</th><th>ctr</th><th>cpc</th>{% endfor %}</tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}<th>{{ cols.objective }}</th>{% for p in poll.periods %}<th>{{ cols.impressions }}</th><th>{{ cols.clicks }}</th><th>{{ cols.spend }}</th><th>{{ cols.ctr }}</th><th>{{ cols.cpc }}</th>{% endfor %}</tr>
 </thead>
 <tbody>
 {% for row in poll.delivery %}
@@ -57,7 +59,7 @@
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
 <thead>
 <tr><th colspan="{{ poll.levels|length }}">{{ poll.event_label }}</th>{% for p in poll.periods %}<th colspan="2">{{ p }}</th>{% endfor %}<th></th></tr>
-<tr>{% for l in poll.levels %}<th>{{ l }}</th>{% endfor %}{% for p in poll.periods %}<th>conversions_reported</th><th>spend / conversions_reported</th>{% endfor %}<th>attribution_window</th></tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for p in poll.periods %}<th>{{ cols.conversions_reported }}</th><th>{{ cols.cost_per_conversion }}</th>{% endfor %}<th>{{ cols.attribution_window }}</th></tr>
 </thead>
 <tbody>
 {% for row in poll.conversions %}
@@ -72,8 +74,8 @@
 <h2>{{ live.h_budget }}</h2>
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
 <thead>
-<tr><th colspan="{{ poll.levels|length }}">{{ poll.periods[2] }}</th><th colspan="3">clicks</th><th colspan="3">{{ poll.event_label }}</th></tr>
-<tr>{% for l in poll.levels %}<th>{{ l }}</th>{% endfor %}{% for _ in range(2) %}<th>count</th><th>event_floor</th><th>status_labels</th>{% endfor %}</tr>
+<tr><th colspan="{{ poll.levels|length }}">{{ poll.periods[2] }}</th><th colspan="3">{{ cols.clicks }}</th><th colspan="3">{{ poll.event_label }}</th></tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for _ in range(2) %}<th>{{ cols.count }}</th><th></th><th>{{ cols.status }}</th>{% endfor %}</tr>
 </thead>
 <tbody>
 {% for row in poll.budget %}
