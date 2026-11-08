@@ -193,3 +193,31 @@ def test_prune_missing_root_and_boundary(tmp_path: Path) -> None:
     (tmp_path / "r" / "c" / "stray.txt").write_text("x")  # files are not poll directories
     assert prune(tmp_path / "r", store, clock, 7) == [d]
     assert (tmp_path / "r" / "c" / "stray.txt").exists()
+
+
+# Review F1 (review/L2 481be59): the REFERENCES in SCHEMA are enforced.
+
+
+def test_finish_poll_never_begun_rejected_like_fake(tmp_path: Path) -> None:
+    """tests/fakes/live.py: finishing a never-begun poll raises; rows must not orphan."""
+    from tests.fakes.live import FakeStore
+
+    rec = _rec("c", NOON)
+    with pytest.raises(KeyError):
+        FakeStore().finish_poll(rec, [])
+    s = SqliteStore.open(tmp_path / "s.sqlite")
+    with pytest.raises(sqlite3.IntegrityError):
+        s.finish_poll(rec, [_row(rec.poll_id, None)])
+    assert s.rows(rec.poll_id) == []
+
+
+def test_add_refresh_for_unknown_poll_rejected(tmp_path: Path) -> None:
+    """§4.1: refreshes.poll_id REFERENCES polls(poll_id)."""
+    s = SqliteStore.open(tmp_path / "s.sqlite")
+    r = RefreshRecord(
+        refresh_id="lv_1", poll_id="poll_nope", client_id="c", at=NOON,
+        status="skipped", reason=None, run_id=None,
+    )  # fmt: skip
+    with pytest.raises(sqlite3.IntegrityError):
+        s.add_refresh(r)
+    assert s.latest_refresh("c") is None
