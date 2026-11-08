@@ -7,9 +7,14 @@ read-only through a ``file:<path>?mode=ro`` URI.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
+from bayesian_marketing.core import Money
 from bayesian_marketing.live.contracts import LiveRow, PollRecord, RefreshRecord
 
 SCHEMA_VERSION = "1"
@@ -68,31 +73,228 @@ class SqliteStore:
     @classmethod
     def open(cls, path: Path, *, read_only: bool = False) -> SqliteStore:
         """Create the schema when read-write (idempotent). Read-only never creates a file."""
-        raise NotImplementedError("L2")
+        path = Path(path)
+        if read_only:
+            if not path.is_file():
+                raise FileNotFoundError(f"no live store at {path}")
+            conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        if not read_only:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(SCHEMA)
+        return cls(conn, path, read_only)
 
     def close(self) -> None:
-        raise NotImplementedError("L2")
+        self._conn.close()
+
+    # ------------------------------------------------------------------ writes
 
     def begin_poll(self, rec: PollRecord) -> None:
-        raise NotImplementedError("L2")
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO polls (poll_id, client_id, platform, account_id, started_at,"
+                " window_start, window_end, recording_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rec.poll_id,
+                    rec.client_id,
+                    rec.platform,
+                    rec.account_id,
+                    rec.started_at.isoformat(),
+                    rec.window[0].isoformat(),
+                    rec.window[1].isoformat(),
+                    rec.recording_dir,
+                ),
+            )
 
     def finish_poll(self, rec: PollRecord, rows: list[LiveRow]) -> None:
-        raise NotImplementedError("L2")
-
-    def latest_poll(self, client_id: str, *, ok_only: bool = True) -> PollRecord | None:
-        raise NotImplementedError("L2")
-
-    def rows(self, poll_id: str) -> list[LiveRow]:
-        raise NotImplementedError("L2")
-
-    def polls(self, client_id: str, *, limit: int) -> list[PollRecord]:
-        raise NotImplementedError("L2")
+        if rec.status not in ("ok", "error"):
+            raise ValueError("an outcome is ok or error")
+        if rec.finished_at is None:
+            raise ValueError("an outcome needs finished_at")
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO poll_outcomes (poll_id, finished_at, status, error, pull_id, n_rows,"
+                " n_quarantined, empty_account, timezone, currency, account_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rec.poll_id,
+                    rec.finished_at.isoformat(),
+                    rec.status,
+                    rec.error,
+                    rec.pull_id,
+                    rec.n_rows,
+                    rec.n_quarantined,
+                    int(rec.empty_account),
+                    rec.timezone,
+                    rec.currency,
+                    json.dumps(rec.account, sort_keys=True),
+                ),
+            )
+            self._conn.executemany(
+                "INSERT INTO rows (poll_id, client_id, platform, ad_id, date, entity_ids_json,"
+                " entity_names_json, objective, impressions, clicks, spend_amount,"
+                " spend_currency, conversions_reported, conversions_observed, revenue_amount,"
+                " revenue_currency, attribution_window)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [_row_params(rec.poll_id, r) for r in rows],
+            )
 
     def add_refresh(self, rec: RefreshRecord) -> None:
-        raise NotImplementedError("L2")
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO refreshes (refresh_id, poll_id, client_id, at, status, reason,"
+                " run_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rec.refresh_id,
+                    rec.poll_id,
+                    rec.client_id,
+                    rec.at.isoformat(),
+                    rec.status,
+                    rec.reason,
+                    rec.run_id,
+                ),
+            )
+
+    # ------------------------------------------------------------------ reads
+
+    def _polls(self, client_id: str) -> list[PollRecord]:
+        cur = self._conn.execute(
+            "SELECT p.*, o.poll_id AS o_poll_id, o.finished_at, o.status, o.error, o.pull_id,"
+            " o.n_rows, o.n_quarantined, o.empty_account, o.timezone, o.currency, o.account_json"
+            " FROM polls p LEFT JOIN poll_outcomes o ON o.poll_id = p.poll_id"
+            " WHERE p.client_id = ?",
+            (client_id,),
+        )
+        recs = [_poll_record(r) for r in cur.fetchall()]
+        # started_at parsed, not compared as text: newest first (§4.1)
+        return sorted(recs, key=lambda r: r.started_at, reverse=True)
+
+    def latest_poll(self, client_id: str, *, ok_only: bool = True) -> PollRecord | None:
+        for r in self._polls(client_id):
+            if not ok_only or r.status == "ok":
+                return r
+        return None
+
+    def rows(self, poll_id: str) -> list[LiveRow]:
+        cur = self._conn.execute(
+            "SELECT * FROM rows WHERE poll_id = ? ORDER BY date, ad_id", (poll_id,)
+        )
+        return [_live_row(r) for r in cur.fetchall()]
+
+    def polls(self, client_id: str, *, limit: int) -> list[PollRecord]:
+        return self._polls(client_id)[: max(limit, 0)]
 
     def latest_refresh(self, client_id: str) -> RefreshRecord | None:
-        raise NotImplementedError("L2")
+        cur = self._conn.execute("SELECT * FROM refreshes WHERE client_id = ?", (client_id,))
+        recs = [_refresh_record(r) for r in cur.fetchall()]
+        return max(recs, key=lambda r: r.at) if recs else None
 
     def clients(self) -> list[str]:
-        raise NotImplementedError("L2")
+        cur = self._conn.execute("SELECT DISTINCT client_id FROM polls ORDER BY client_id")
+        return [r[0] for r in cur.fetchall()]
+
+
+def _money_text(m: Money | None) -> tuple[str | None, str | None]:
+    return (None, None) if m is None else (str(m.amount), m.currency)
+
+
+def _row_params(poll_id: str, r: LiveRow) -> tuple[Any, ...]:
+    rev_amount, rev_currency = _money_text(r.revenue_reported)
+    return (
+        poll_id,
+        r.client_id,
+        r.platform,
+        r.entity_ids["ad"],
+        r.date.isoformat(),
+        json.dumps(r.entity_ids, sort_keys=True),
+        json.dumps(r.entity_names, sort_keys=True),
+        r.objective,
+        r.impressions,
+        r.clicks,
+        str(r.spend.amount),
+        r.spend.currency,
+        r.conversions_reported,
+        r.conversions_observed,
+        rev_amount,
+        rev_currency,
+        r.attribution_window,
+    )
+
+
+def _poll_record(r: sqlite3.Row) -> PollRecord:
+    base: dict[str, Any] = {
+        "poll_id": r["poll_id"],
+        "client_id": r["client_id"],
+        "platform": r["platform"],
+        "account_id": r["account_id"],
+        "started_at": datetime.fromisoformat(r["started_at"]),
+        "window": (date.fromisoformat(r["window_start"]), date.fromisoformat(r["window_end"])),
+        "recording_dir": r["recording_dir"],
+    }
+    if r["o_poll_id"] is None:  # begun, never finished: the process died (§4.1)
+        return PollRecord(
+            **base,
+            finished_at=None,
+            status="interrupted",
+            error=None,
+            pull_id=None,
+            n_rows=0,
+            n_quarantined=0,
+            empty_account=False,
+            timezone=None,
+            currency=None,
+            account={},
+        )
+    return PollRecord(
+        **base,
+        finished_at=datetime.fromisoformat(r["finished_at"]),
+        status=r["status"],
+        error=r["error"],
+        pull_id=r["pull_id"],
+        n_rows=r["n_rows"],
+        n_quarantined=r["n_quarantined"],
+        empty_account=bool(r["empty_account"]),
+        timezone=r["timezone"],
+        currency=r["currency"],
+        account=json.loads(r["account_json"]),
+    )
+
+
+def _live_row(r: sqlite3.Row) -> LiveRow:
+    revenue = (
+        None
+        if r["revenue_amount"] is None
+        else Money(amount=Decimal(r["revenue_amount"]), currency=r["revenue_currency"])
+    )
+    return LiveRow(
+        poll_id=r["poll_id"],
+        client_id=r["client_id"],
+        platform=r["platform"],
+        entity_ids=json.loads(r["entity_ids_json"]),
+        entity_names=json.loads(r["entity_names_json"]),
+        objective=r["objective"],
+        date=date.fromisoformat(r["date"]),
+        impressions=r["impressions"],
+        clicks=r["clicks"],
+        spend=Money(amount=Decimal(r["spend_amount"]), currency=r["spend_currency"]),
+        conversions_reported=r["conversions_reported"],
+        conversions_observed=r["conversions_observed"],
+        revenue_reported=revenue,
+        attribution_window=r["attribution_window"],
+    )
+
+
+def _refresh_record(r: sqlite3.Row) -> RefreshRecord:
+    return RefreshRecord(
+        refresh_id=r["refresh_id"],
+        poll_id=r["poll_id"],
+        client_id=r["client_id"],
+        at=datetime.fromisoformat(r["at"]),
+        status=r["status"],
+        reason=r["reason"],
+        run_id=r["run_id"],
+    )
