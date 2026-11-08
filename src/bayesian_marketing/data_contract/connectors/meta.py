@@ -139,6 +139,21 @@ def conversion_type(elements: list[dict[str, Any]], wanted: str | None) -> str |
     return next((a for a in PURCHASE_ACTION_TYPES if a in seen), None)
 
 
+def raw(v: Any) -> str | None:
+    """A value as the API sent it, as text: a string unchanged, a JSON int as ``str(int)``.
+
+    No numeric parsing, so a name like ``001`` or ``1e3`` stays as written (review F1, F2).
+    None and "" are absent. Any other JSON type falls back to ``text()``.
+    """
+    if v is None or v == "":
+        return None
+    if isinstance(v, str):
+        return v
+    if isinstance(v, int) and not isinstance(v, bool):
+        return str(v)
+    return text(v)
+
+
 def is_lead_event(wanted: str | None) -> bool:
     """A config event containing ``lead`` is a lead event: counted, never valued (§3.2, D33)."""
     return wanted is not None and "lead" in wanted
@@ -183,10 +198,10 @@ def _record(
             "entity_ids.ad_set": text(el.get("adset_id")),
             "entity_ids.ad": text(el.get("ad_id")),
             # §3.1: names land in PerformanceRow.entity_names with the suffix stripped (B4, D34)
-            "entity_ids.account_name": text(el.get("account_name")),
-            "entity_ids.campaign_name": text(el.get("campaign_name")),
-            "entity_ids.ad_set_name": text(el.get("adset_name")),
-            "entity_ids.ad_name": text(el.get("ad_name")),
+            "entity_ids.account_name": raw(el.get("account_name")),
+            "entity_ids.campaign_name": raw(el.get("campaign_name")),
+            "entity_ids.ad_set_name": raw(el.get("adset_name")),
+            "entity_ids.ad_name": raw(el.get("ad_name")),
             "objective": text(el.get("objective")) if OBJECTIVE_REQUESTED else None,
             "impressions": text(el.get("impressions")),
             "clicks": _clicks(el, absent),
@@ -261,13 +276,14 @@ def fetch(config: ClientConfig, window: tuple[date, date], t: Transport) -> Fetc
     action_type = conversion_type(elements, wanted)
     absent: list[str] = []
     records = [_record(el, window, action_type, absent, lead) for el in elements]
-    if elements:
-        if wanted is not None:
-            if action_type is None:
-                notes.append(f"{PLATFORM}: conversion event {wanted} not seen in this pull")
-            else:
-                notes.append(f"{PLATFORM}: conversion event {wanted} used")
-        elif action_type is None:
+    if wanted is not None:
+        # §3.2, integrator ruling on review F3: an empty pull has wanted in neither list
+        if action_type is None:
+            notes.append(f"{PLATFORM}: conversion event {wanted} not seen in this pull")
+        else:
+            notes.append(f"{PLATFORM}: conversion event {wanted} used")
+    elif elements:
+        if action_type is None:
             notes.append(
                 f"{PLATFORM}: conversions and revenue are 0 because no purchase action "
                 f"({', '.join(PURCHASE_ACTION_TYPES)}) was reported"
@@ -297,7 +313,7 @@ def _account(info: dict[str, Any]) -> dict[str, str]:
     """§3.3: the account node's ``ACCOUNT_FIELDS`` as raw text; a key not returned is absent."""
     out: dict[str, str] = {}
     for key in ACCOUNT_FIELDS:
-        v = text(info.get(key))
+        v = raw(info.get(key))
         if v is not None:
             out[key] = v
     return out
