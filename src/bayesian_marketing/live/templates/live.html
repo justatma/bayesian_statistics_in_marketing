@@ -1,6 +1,4 @@
-{# Live view client page (spec v0.2 §5 L3). Every string arrives from the registries through view.py.
-   The floors column has no heading: live_columns.event_floor names the status words, which the
-   frozen budget test forbids beside a different word (manifest L3, open question 5). #}
+{# Live view client page (spec v0.2 §5 L3). Every string arrives from the registries through view.py. #}
 {% macro entity_cells(entities) %}
 {% for e in entities %}<td>{% if e.name %}{{ e.name }} {% endif %}<code>{{ e.id }}</code></td>{% endfor %}
 {% endmacro %}
@@ -75,7 +73,7 @@
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
 <thead>
 <tr><th colspan="{{ poll.levels|length }}">{{ poll.periods[2] }}</th><th colspan="3">{{ cols.clicks }}</th><th colspan="3">{{ poll.event_label }}</th></tr>
-<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for _ in range(2) %}<th>{{ cols.count }}</th><th></th><th>{{ cols.status }}</th>{% endfor %}</tr>
+<tr>{% for l in poll.levels %}<th>{{ cols[l] }}</th>{% endfor %}{% for _ in range(2) %}<th>{{ cols.count }}</th><th>{{ cols.event_floor }}</th><th>{{ cols.status }}</th>{% endfor %}</tr>
 </thead>
 <tbody>
 {% for row in poll.budget %}
@@ -91,7 +89,7 @@
 {% else %}
 {% if engine.findings %}
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
-<thead><tr>{% for k in poll.finding_keys %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+<thead><tr>{% for k in poll.finding_keys %}<th>{{ cols[k] }}</th>{% endfor %}</tr></thead>
 <tbody>
 {% for f in engine.findings %}
 <tr>{% for c in f.cells %}<td>{{ c }}</td>{% endfor %}</tr>
@@ -109,7 +107,7 @@
 <p>{{ engine.diag.none }}</p>
 {% else %}
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
-<thead><tr>{% for k in poll.diag_keys %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+<thead><tr>{% for k in poll.diag_keys %}<th>{{ cols[k] }}</th>{% endfor %}</tr></thead>
 <tbody>
 {% for r in engine.diag.rows %}
 <tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>

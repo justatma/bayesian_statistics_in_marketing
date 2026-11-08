@@ -2,8 +2,7 @@
 
 Every sentence on the page comes from ``phrasing.yaml`` (the ``live`` block, ``status_labels``,
 ``evidence_plain``, ``watermark``) or from the reporting helpers. Table and header labels come
-from ``live_columns`` (B13). The engine table keeps the ``finding_lines`` and
-``DiagnosticsReport`` keys as headings; ``live_columns`` has none for them (manifest L3).
+from ``live_columns`` (B13, B15), the engine and diagnostics headings included.
 """
 
 from __future__ import annotations
