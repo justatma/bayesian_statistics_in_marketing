@@ -151,6 +151,8 @@ class CompareRequest(Frozen):
     window: tuple[date, date]
     horizon: Horizon
     segments: dict[str, Any] = Field(default_factory=dict)
+    # D46: a lead run counts leads and never values them (D33). Default keeps purchase runs.
+    conversion_kind: Literal["purchase", "lead"] = "purchase"
 
 
 class RunResult(Frozen):
