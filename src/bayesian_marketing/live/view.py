@@ -399,6 +399,18 @@ def _priors(
     cols: dict[str, str], places: int,
 ) -> dict[str, Any]:  # fmt: skip
     """Prior learning §5 Page, R8, R16: the latest score file, read only; the page never scores."""
+    try:
+        return _priors_section(client_id, data_dir, last_ok, live, cols, places)
+    except Exception as e:  # B20 (2), B21 F2: an unreadable or odd file never fails the page
+        reason = (str(e).splitlines() or [""])[0][:200]
+        text = f"{type(e).__name__}: {reason}" if reason else type(e).__name__
+        return {"sentence": live["prior_score_unreadable"].format(reason=text), "paths": []}
+
+
+def _priors_section(
+    client_id: str, data_dir: Path, last_ok: PollRecord, live: dict[str, str],
+    cols: dict[str, str], places: int,
+) -> dict[str, Any]:  # fmt: skip
     score = load_latest_score(client_id, data_dir)
     if score is None:
         return {"sentence": live["no_prior_score"], "paths": []}
@@ -440,7 +452,7 @@ def _priors(
                     ],
                 }
             )
-        paths.append({"path": path, "candidates": rows, "ads": ads})
+        paths.append({"path": cols.get(path, path), "candidates": rows, "ads": ads})  # B20 (4)
     return {
         "sentence": None,
         "scored_at": f"{fmt_utc(score.scored_at)} UTC",

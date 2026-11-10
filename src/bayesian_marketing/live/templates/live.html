@@ -126,7 +126,7 @@
 <p>{{ cols.scored_at }}: {{ priors.scored_at }}{% if priors.stale %} {{ priors.stale }}{% endif %}</p>
 <p>{{ priors.note }}</p>
 {% for p in priors.paths %}
-<h4><code>{{ p.path }}</code></h4>
+<h4>{{ p.path }}</h4>
 <table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
 <thead><tr><th>{{ cols.role }}</th><th>{{ cols.prior }}</th><th>{{ cols.ads_surprised }}</th><th>{{ cols.log_score_vs_in_force }}</th></tr></thead>
 <tbody>

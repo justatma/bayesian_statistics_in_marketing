@@ -36,6 +36,7 @@ NO_CONVERSION_ROWS = "no rows with conversions"
 CLICKS_ABOVE_IMPRESSIONS = "clicks above impressions"
 CONVERSIONS_ABOVE_CLICKS = "reported conversions above clicks (D34)"
 NO_ADS_WITH_DATA = "no ads with data"
+NEGATIVE_COUNTS = "negative counts"  # B21 F1
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,9 @@ def _counts(
             n = sum(r.clicks for r in used)
             k = math.floor(sum(_conversions(r) or 0.0 for r in used) + 0.5)  # R5: half-up once
             over = CONVERSIONS_ABOVE_CLICKS
-        if n == 0:
+        if n < 0 or k < 0:
+            skipped[ad] = NEGATIVE_COUNTS  # B21 F1: no -inf or NaN reaches a score
+        elif n == 0:
             skipped[ad] = NO_TRIALS  # R6
         elif k > n:
             skipped[ad] = over  # R6

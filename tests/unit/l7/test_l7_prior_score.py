@@ -1,11 +1,15 @@
 """L7 unit checks beyond the frozen tests: the latest-file rule (B18), foreign names ignored, a
 non-Beta prior in force leaves the path without candidates, the page escapes ad names and reads
-the file only, and ``live score-priors`` reports a scorer failure with exit 1."""
+the file only, ``live score-priors`` reports a scorer failure with exit 1, an unreadable or odd
+score file never fails the page (B20, B21 F2), and negative counts are skipped (B21 F1)."""
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import html
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +37,12 @@ def _config() -> C.ClientConfig:
     )
 
 
-def _poll(store: FakeStore, started: dt.datetime, ads: list[tuple[str, str, int, int]]) -> None:
+def _poll(
+    store: FakeStore,
+    started: dt.datetime,
+    ads: list[tuple[str, str, int, int]],
+    conv: dict[str, float] | None = None,
+) -> None:
     pid = "poll_" + hashlib.sha256(started.isoformat().encode()).hexdigest()[:8]
     rec = PollRecord(
         poll_id=pid, client_id=CLIENT, platform="meta", account_id="act_1",
@@ -53,7 +62,7 @@ def _poll(store: FakeStore, started: dt.datetime, ads: list[tuple[str, str, int,
             impressions=imp,
             clicks=clk,
             spend=C.Money(amount="1.00", currency="USD"),
-            conversions_reported=1.0,
+            conversions_reported=(conv or {}).get(ad, 1.0),
             conversions_observed=None,
             revenue_reported=None,
             attribution_window="7d_click",
@@ -135,3 +144,67 @@ def test_cli_score_priors_reports_a_failure_and_exits_one(
     assert cli.main(["live", "score-priors", "--client", CLIENT]) == 1
     out = [x for x in capsys.readouterr().out.splitlines() if x.strip()]
     assert len(out) == 1 and "no registry" in out[0]
+
+
+def _render(store: FakeStore, data_dir: Path) -> str:
+    return view.render(
+        store, CLIENT, FixedClock(NOW), registry=load_live_registry(),
+        phrasing=registries.load("phrasing"), data_dir=data_dir, config=_config(),
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"client_id": "x"}', "[]"])
+def test_unreadable_latest_score_file_never_fails_the_page(tmp_path: Path, content: str) -> None:
+    store = FakeStore()
+    _poll(store, NOW - dt.timedelta(minutes=30), [("ad_x", "X", 400, 4)])
+    folder = tmp_path / ps.SCORES_DIR / CLIENT
+    folder.mkdir(parents=True)
+    (folder / "20261110T180000Z.json").write_text(content)
+    page = _render(store, tmp_path)
+    live = registries.load("phrasing")["live"]
+    head = live["prior_score_unreadable"].split("{reason}")[0]
+    assert head and head in html.unescape(page)  # B20 (2)
+    assert live["no_prior_score"] not in page
+
+
+def test_path_subheadings_come_from_live_columns(tmp_path: Path) -> None:
+    store = FakeStore()
+    _poll(store, NOW - dt.timedelta(minutes=30), [("ad_x", "X", 400, 4), ("ad_y", "Y", 300, 9)])
+    ps.write_score(ps.score_priors(_config(), store, FixedClock(NOW), data_dir=tmp_path), tmp_path)
+    cols = registries.load("phrasing")["live_columns"]
+    heads = re.findall(r"<h4[^>]*>(.*?)</h4>", _render(store, tmp_path), re.S)
+    assert [html.unescape(h).strip() for h in heads] == [cols["ctr"], cols["cvr"]]  # B20 (4)
+
+
+def test_negative_counts_are_skipped_and_never_reach_the_file(tmp_path: Path) -> None:
+    """B21 F1, ported from the blind review's test_negative_conversions."""
+    store = FakeStore()
+    _poll(
+        store,
+        NOW - dt.timedelta(hours=1),
+        [("ad_a", "A", 100, 10), ("ad_b", "B", 100, 10), ("ad_c", "C", -5, 2)],
+        conv={"ad_a": -3.0},
+    )
+    score = ps.score_priors(_config(), store, FixedClock(NOW), data_dir=tmp_path)
+    for cand in score.paths["cvr"]:
+        assert cand.skipped.get("ad_a") == ps.NEGATIVE_COUNTS
+        assert "ad_a" not in {a.ad_id for a in cand.ads}
+    for cand in score.paths["ctr"]:
+        assert cand.skipped.get("ad_c") == ps.NEGATIVE_COUNTS
+    assert ps.NEGATIVE_COUNTS == "negative counts"
+    text = ps.write_score(score, tmp_path).read_text()
+    assert "Infinity" not in text and "NaN" not in text
+
+
+def test_naive_scored_at_never_fails_the_page(tmp_path: Path) -> None:
+    """B21 F2, ported from the blind review's test_page_naive_scored_at."""
+    store = FakeStore()
+    _poll(store, NOW - dt.timedelta(minutes=30), [("ad_x", "X", 400, 4)])
+    data = json.loads(ps.write_score(_empty(NOW), tmp_path).read_text())
+    data["scored_at"] = "2026-11-10T18:00:01"  # no offset; a later stamp so it is the latest
+    folder = tmp_path / ps.SCORES_DIR / CLIENT
+    (folder / "20261110T180001Z.json").write_text(json.dumps(data))
+    page = _render(store, tmp_path)
+    head = registries.load("phrasing")["live"]["prior_score_unreadable"].split("{reason}")[0]
+    assert head in html.unescape(page)
+    assert page.count("<h2") == 5
