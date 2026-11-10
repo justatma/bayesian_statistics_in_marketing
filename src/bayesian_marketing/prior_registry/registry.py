@@ -20,6 +20,11 @@ then default and records every hop:
 Beta and its 99th percentile, computed exactly from the Beta quantile function rather than from
 draws, must not exceed the ceiling. A path without a ceiling records the prior's quantiles and
 passes.
+
+Conversion kind (prior learning v0.2, L6): on a lead run the default hop reads ``lead_records``
+first for a path it holds (R1), with an id that names the table (C1), and the predictive check
+uses ``bounds/plausibility/ceiling_q99_lead`` for a path that table holds (R3). Any other path,
+and every purchase run, behaves exactly as before (C3, R15).
 """
 
 from __future__ import annotations
@@ -46,6 +51,8 @@ from bayesian_marketing.core.registries import RegistryError
 
 DEFAULT_DATA_DIR = "data/generated"
 Q99 = 0.99  # the percentile named by bounds/plausibility/ceiling_q99
+CONVERSION_KINDS = ("purchase", "lead")
+LEAD_TABLE = "lead_records"
 CLIENT_PREFIX = "client:"
 VERTICAL_PREFIX = "vertical:"
 
@@ -156,8 +163,21 @@ def propose(record: PriorRecord) -> str:
     return pid
 
 
-def _ceiling(parameter_path: str) -> float | None:
+def _check_kind(conversion_kind: str) -> None:
+    if conversion_kind not in CONVERSION_KINDS:
+        raise ValueError(
+            f"conversion_kind must be one of {CONVERSION_KINDS}, got {conversion_kind!r}"
+        )
+
+
+def _ceiling(parameter_path: str, conversion_kind: str = "purchase") -> float | None:
+    """The plausibility ceiling for the path's last segment. A lead kind reads the lead table
+    first (R3); a key it lacks falls back to the purchase table, as resolve does (C1)."""
     key = parameter_path.split(".")[-1]
+    if conversion_kind == "lead":
+        lead = registries.resolve("bounds/plausibility/ceiling_q99_lead@v1")
+        if key in lead:
+            return float(lead[key])
     ceilings = registries.resolve("bounds/plausibility/ceiling_q99@v1")
     return float(ceilings[key]) if key in ceilings else None
 
@@ -177,8 +197,9 @@ def _frozen_dist(family: str, params: dict[str, float]) -> Any:
 def predictive_check(record: PriorRecord, *, conversion_kind: str = "purchase") -> dict[str, float]:
     """C6. Raises PriorRefused when the prior's 99th percentile exceeds the path's ceiling.
 
-    ``conversion_kind`` (prior learning R3): skeleton, accepted and not yet used (L6)."""
-    ceiling = _ceiling(record.parameter_path)
+    ``conversion_kind="lead"`` checks against ``ceiling_q99_lead`` (prior learning R3)."""
+    _check_kind(conversion_kind)
+    ceiling = _ceiling(record.parameter_path, conversion_kind)
     if ceiling is not None and record.family != "beta":
         raise PriorRefused(
             f"{record.parameter_path!r} is a rate with a plausibility ceiling; "
@@ -209,14 +230,16 @@ def predictive_check(record: PriorRecord, *, conversion_kind: str = "purchase") 
 def approve(prior_id: str, approver: str, *, conversion_kind: str = "purchase") -> PriorRecord:
     """Approve after the prior predictive check (C6). Called by atmaos.approve_prior only.
 
-    ``conversion_kind`` (prior learning R3): skeleton, accepted and not yet used (L6)."""
+    ``conversion_kind`` goes to the predictive check, so a lead prior is checked against the
+    lead ceiling (prior learning R3)."""
     if not approver:
         raise ValueError("approve needs an approver")
+    _check_kind(conversion_kind)
     rec = _read_record(prior_id)
     if rec.approved:
         return rec
     try:
-        check = predictive_check(rec)
+        check = predictive_check(rec, conversion_kind=conversion_kind)
     except PriorRefused as exc:
         _log("refuse", prior_id, approver=approver, reason=str(exc))
         raise
@@ -274,10 +297,15 @@ def _as_dt(v: Any) -> datetime:
 
 
 def _default_prior(parameter_path: str, *, conversion_kind: str = "purchase") -> PriorRecord | None:
-    # conversion_kind (prior learning R1): skeleton, accepted and not yet used (L6)
+    """The framework default for the path. A lead kind reads ``lead_records`` first and returns
+    a path it holds (R1); otherwise ``records`` then ``pending_records``, unchanged."""
+    _check_kind(conversion_kind)
     reg = registries.load("priors/default")
     version = str(reg["version"])
-    for table, elic_key in (("records", "elicitation"), ("pending_records", "pending_elicitation")):
+    tables = [("records", "elicitation"), ("pending_records", "pending_elicitation")]
+    if conversion_kind == "lead":
+        tables.insert(0, (LEAD_TABLE, "elicitation"))
+    for table, elic_key in tables:
         spec = (reg.get(table) or {}).get(parameter_path)
         if spec is None:
             continue
@@ -295,8 +323,11 @@ def _default_prior(parameter_path: str, *, conversion_kind: str = "purchase") ->
             approved_at=approved_at,
         )
         params = {k: float(v) for k, v in spec["params"].items()}
+        id_payload: dict[str, Any] = {"default": parameter_path, "params": params}
+        if table == LEAD_TABLE:  # C1: a lead default's id never equals a purchase default's
+            id_payload["table"] = LEAD_TABLE
         return PriorRecord(
-            prior_id=make_id("pr_", {"default": parameter_path, "params": params}),
+            prior_id=make_id("pr_", id_payload),
             parameter_path=parameter_path,
             family=spec["family"],
             params=params,
