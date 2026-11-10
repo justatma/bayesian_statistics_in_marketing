@@ -350,6 +350,21 @@ def _g8(parameter_path: str, client_id: str, as_of: datetime, reason: str) -> Ga
     return GateFailure(res)
 
 
+def _recheck_reason(rec: PriorRecord, conversion_kind: str, exc: PriorRefused) -> str:
+    """G8 reason for an approved client prior that fails this run's ceiling: names the prior,
+    the path, its 99th percentile and the ceiling for the kind."""
+    ceiling = _ceiling(rec.parameter_path, conversion_kind)
+    try:
+        dist = _frozen_dist(rec.family, rec.params)
+        q99 = f"{float(dist.ppf(Q99)):.4f}" if dist is not None else "not computable"
+    except (KeyError, ValueError, ZeroDivisionError):
+        q99 = "not computable"
+    return (
+        f"client prior {rec.prior_id} for {rec.parameter_path!r} fails the predictive check on "
+        f"a {conversion_kind} run: 99th percentile {q99}, ceiling {ceiling} ({exc})"
+    )
+
+
 def resolve(
     parameter_path: str, client_id: str, as_of: datetime, *, conversion_kind: str = "purchase"
 ) -> PriorRecord:
@@ -358,7 +373,12 @@ def resolve(
     Proposals whose elicitation was created after ``as_of`` are invisible. Approval time is not
     filtered: the frozen acceptance test approves at wall-clock time and resolves at an earlier
     ``as_of`` (open question in the P7 manifest).
+
+    An approved client prior is checked again against the ceiling for this run's kind, whatever
+    kind approved it: a prior approved under the lead ceiling fails G8 on a purchase run above
+    the purchase ceiling (L6 blind review F1).
     """
+    _check_kind(conversion_kind)  # before any hop (L6 blind review F3)
     client = _latest_client_prior(parameter_path, client_id, _as_dt(as_of))
     if client is not None:
         if not client.approved:
@@ -368,6 +388,15 @@ def resolve(
                 as_of,
                 f"client prior {client.prior_id} for {parameter_path!r} is not approved (I10)",
             )
+        try:
+            predictive_check(client, conversion_kind=conversion_kind)
+        except PriorRefused as exc:
+            raise _g8(
+                parameter_path,
+                client_id,
+                as_of,
+                _recheck_reason(client, conversion_kind, exc),
+            ) from exc
         return _rebuild(client, resolution_path=[f"client:{client_id}:{client.prior_id}"])
     hops = [f"client:{client_id}:none", "vertical:unmapped"]
     default = _default_prior(parameter_path, conversion_kind=conversion_kind)
