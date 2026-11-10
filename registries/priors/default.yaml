@@ -81,13 +81,13 @@ records:
 lead_records:
   cvr:
     family: beta
-    params: {a: 2.2, b: 22.0}               # leads per link click: median 8%, 90% 1.9% to 20%, worth ~24 clicks
+    params: {a: 1.4, b: 10.6}               # leads per link click: median 9%, 90% 1.3% to 29%, worth ~12 clicks (widened, D49)
     elicitation:
       source: ai_proposal
-      rationale: "F7 benchmarks: Meta to landing page 10.5% (WordStream 2019), landing pages 6.6% median (Unbounce 2024), Instant Forms 8.5% (WordStream 2026); central 7%, 90% 2% to 22%, fitted as a Beta on the log scale"
+      rationale: "F7 benchmarks: Meta to landing page 10.5% (WordStream 2019), landing pages 6.6% median (Unbounce 2024), Instant Forms 8.5% (WordStream 2026); central 7%, widened to log-scale sigma 1.0 (90% about 1.4% to 36%) by owner approval (D49), fitted as a Beta"
       author: claude
       approved_by: owner
-      approved_at: "2026-11-10T00:00:00Z"
+      approved_at: "2026-11-10T18:30:00Z"
 elicitation:
   source: human
   rationale: "Manuscript ch. 2 and 4 teaching priors, approved as framework defaults (spec v0.3 §14)"
