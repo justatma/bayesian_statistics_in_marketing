@@ -113,6 +113,8 @@ RATE_METRICS = ("ctr", "cvr")
 DISPLAY = ("ctr", "cvr", "cpa", "aov", "roas", "contribution_per_click")
 """Quantities derived per compared ad, besides the metric itself (§5.5)."""
 CONVERSION_BASED = frozenset({"cvr", "cpa", "roas", "contribution_per_click"})
+VALUED = ("aov", "roas", "contribution_per_click")
+"""D46: quantities that price a conversion; never derived when the conversion is a lead."""
 SIGNED_INPUTS = ("cvr", "aov")
 """D10: a signed money quantity carries the worst status of these inputs of the same ad."""
 
@@ -127,6 +129,7 @@ G9_REQUIREMENT = "approved economics with a loss tolerance are needed before any
 NOT_ESTIMABLE_REASON = "{quantity} not estimable for {options}: {why}"
 DATA_REQUIREMENT = "{quantity} has to become estimable for every compared ad"
 PLANNED_OBJECTIVE = "objective {metric!r} needs its value model ({model}); not built yet (D33)"
+LEAD_NOT_VALUED = "a lead is counted, never valued (D33)"
 INHERITED_REASON = "inherits the worst status of its inputs ({inputs}) (D10)"
 NON_FINITE_REASON = (
     "the posterior has no finite spread for this quantity with the data seen (too few events)"
@@ -880,8 +883,17 @@ def _immature_cohorts(data: FunnelData, ads: list[str]) -> int:
 # ------------------------------------------------------------------------------- run
 
 
+def _request_key(request: CompareRequest) -> Any:
+    """The request as it is hashed for seed and run id. A purchase request hashes as it did
+    before ``conversion_kind`` existed, so purchase runs are unchanged (D46)."""
+    if request.conversion_kind == "purchase":
+        return request.model_dump(mode="json", exclude={"conversion_kind"})
+    return request
+
+
 def _seed(manifest: DatasetManifest, request: CompareRequest) -> int:
-    return int(inputs_hash({"manifest": manifest.manifest_id, "request": request})[:8], 16)
+    key = {"manifest": manifest.manifest_id, "request": _request_key(request)}
+    return int(inputs_hash(key)[:8], 16)
 
 
 def _count_rows(pulls: list[PlatformPull]) -> dict[str, int]:
@@ -935,6 +947,9 @@ def execute(
     manifest_dir = Path(manifest_dir) if manifest_dir is not None else Path.cwd()
     start, end = request.window
     metric = request.metric
+    lead = request.conversion_kind == "lead"
+    if lead and metric not in RATE_METRICS:  # D46 (1), D38.2: before any fit, save, publish
+        raise NotInScope(PLANNED_OBJECTIVE.format(metric="leads", model=PLANNED_TARGETS["leads"]))
     cq = compare_quantity(metric)
     mq = metric_quantity(metric)
     objective = objective_for(metric, request.horizon)  # D38.2: before any fit, save, publish
@@ -1020,9 +1035,14 @@ def execute(
 
     # derive (G10), quantity feasibility, publish (G2)
     names = list(dict.fromkeys([mq, cq, *DISPLAY]))
+    if lead:  # D46 (2): a lead is never priced
+        names = [n for n in names if n not in VALUED]
     by_variant, missing = derive_all(
         state, variants, names, (start, end), platform, econ, [n for n in lag_notes]
     )
+    if lead:
+        for v in variants:
+            missing.setdefault(v, {}).update(dict.fromkeys(VALUED, LEAD_NOT_VALUED))
     quantities = [q for v in by_variant.values() for q in v.values()]
     gates.append(_gate("G10", True, [], [q.quantity_id for q in quantities]))
     published, g2 = publish_all(quantities)
@@ -1030,7 +1050,12 @@ def execute(
 
     # compare (G9), decision feasibility, recommend
     run_id = make_id(
-        "run_", {"manifest": manifest.manifest_id, "request": request, "at": started.isoformat()}
+        "run_",
+        {
+            "manifest": manifest.manifest_id,
+            "request": _request_key(request),
+            "at": started.isoformat(),
+        },
     )
     currency = econ.currency if econ is not None else data.currency
     comparison: Comparison | None = None
@@ -1106,6 +1131,8 @@ def execute(
     )
 
     notices = [*fit_notices, *lag_notes]
+    if lead:
+        notices.append(LEAD_NOT_VALUED)  # D46 (3): once
     changes = [c for p in perf for c in p.measurement_changes]
     if changes:
         notices.append(WINDOW_CHANGED.format(changes="; ".join(changes)))

@@ -21,6 +21,7 @@ from bayesian_marketing.core import (
     registries,
 )
 from bayesian_marketing.core.records import ClientConfig
+from bayesian_marketing.data_contract.connectors import meta
 from bayesian_marketing.live.contracts import Clock, LiveRow, PollRecord, RefreshRecord, Store
 
 ONE_AD = "one ad, nothing to compare"
@@ -92,6 +93,7 @@ def _outcome(
             priors=dict(config.priors),
             window=poll_rec.window,
             horizon=_horizon(),
+            conversion_kind=_conversion_kind(config),
         )
         with _data_dir(data_dir):
             ctx = pipeline.execute(manifest, request, manifest_dir=config_root, pulls=[pull])
@@ -100,6 +102,11 @@ def _outcome(
         return "skipped", _gate_text(exc), None
     except Exception as exc:  # C2: refresh never raises
         return "failed", f"{type(exc).__name__}: {exc}", None
+
+
+def _conversion_kind(config: ClientConfig) -> str:
+    """D46: a lead event is counted, never valued; anything else is a purchase."""
+    return "lead" if meta.is_lead_event(config.conversion_event.get(PLATFORM)) else "purchase"
 
 
 def _gate_text(exc: GateFailure) -> str:
