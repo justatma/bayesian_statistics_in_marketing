@@ -576,7 +576,12 @@ def prior_paths() -> list[str]:
 
 
 def resolve_priors(
-    requested: dict[str, str], client_id: str, synthetic: bool, when: datetime
+    requested: dict[str, str],
+    client_id: str,
+    synthetic: bool,
+    when: datetime,
+    *,
+    conversion_kind: str = "purchase",
 ) -> tuple[PriorSet, GateResult]:
     """Framework defaults through ``prior_registry.resolve`` (client, vertical, default); a
     requested id must be the approved prior that path resolves to, else G8 (§11.1). On client
@@ -588,7 +593,8 @@ def resolve_priors(
         reasons += [f"no prior path {p!r} in the registry" for p in unknown]
     records = {}
     for path in paths:
-        rec = prior_registry.resolve(path, client_id, when)  # raises G8 on an unapproved client
+        # raises G8 on an unapproved client; the kind picks the lead default (prior learning L6)
+        rec = prior_registry.resolve(path, client_id, when, conversion_kind=conversion_kind)
         want = requested.get(path)
         if want is not None and want != rec.prior_id:
             reasons.append(
@@ -984,7 +990,13 @@ def execute(
     )
 
     # priors (G8): before anything is fitted
-    priors, g8 = resolve_priors(request.priors, manifest.client_id, manifest.synthetic, started)
+    priors, g8 = resolve_priors(
+        request.priors,
+        manifest.client_id,
+        manifest.synthetic,
+        started,
+        conversion_kind=request.conversion_kind,
+    )
     gates.append(g8)
 
     # lag

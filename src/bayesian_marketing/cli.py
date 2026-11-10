@@ -400,6 +400,14 @@ def live(args: argparse.Namespace) -> int:
             removed = prune(record_root, store, clock, registry.recordings_keep_days)
             _say("Pruned", f"{len(removed)} recording directories")
             return 0
+        if args.live_command == "score-priors":
+            from bayesian_marketing.live.prior_score import score_priors, write_score
+
+            cfg = live_config.load_client(args.client, croot)
+            score = score_priors(cfg, store, clock, data_dir=data_dir)
+            path = write_score(score, data_dir)
+            _say("Priors", f"{cfg.client_id}: scored, {path.name}")  # L7 prints the table
+            return 0
         if args.live_command == "refresh":
             cfg = live_config.load_client(args.client, croot)
             last = store.latest_poll(cfg.client_id)
@@ -463,7 +471,9 @@ def main(argv: list[str] | None = None) -> int:
         default="contribution",
         choices=["ctr", "cvr", "cpa", "roas", "contribution_per_click", "contribution"],
     )
-    lv = sub.add_parser("live", help="the live view: poll, serve, prune, refresh (D41)")
+    lv = sub.add_parser(
+        "live", help="the live view: poll, serve, prune, refresh, score-priors (D41)"
+    )
     lsub = lv.add_subparsers(dest="live_command", required=True)
     lp = lsub.add_parser("poll", help="read each named client's Meta account once into the store")
     who = lp.add_mutually_exclusive_group(required=True)
@@ -474,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
     lsub.add_parser("prune", help="remove recordings older than the registry's keep")
     lr = lsub.add_parser("refresh", help="rerun the engine refresh on the latest good poll")
     lr.add_argument("--client", required=True)
+    ls_ = lsub.add_parser(
+        "score-priors", help="score the priors in force against the client's own data"
+    )
+    ls_.add_argument("--client", required=True)
     args = parser.parse_args(argv)
     if args.command == "demo":
         return demo(args.scenario, args.out, args.seed, args.metric)

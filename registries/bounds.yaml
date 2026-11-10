@@ -14,6 +14,9 @@ dynamics:
   min_days_for_dynamics: 21     # engineering choice
 plausibility:
   ceiling_q99: {ctr: 0.20, cvr: 0.50}   # engineering choice
+  ceiling_q99_lead: {cvr: 0.80}          # engineering choice: lead rates per link click run far above purchase rates (prior learning R3)
+prior_scoring:
+  surprise_tail: 0.05           # engineering choice: a prior is surprised by an ad when its mid-p tail is below this or above 1 - this (R17)
 lag:
   min_lagged_conversions: 50    # engineering choice
   min_maturity: 0.90            # engineering choice

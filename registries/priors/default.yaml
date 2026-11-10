@@ -75,6 +75,19 @@ records:
       author: claude
       approved_by: owner
       approved_at: "2026-11-03T00:00:00Z"
+# Lead conversions (prior learning v0.2, D48): read first for a lead run (R1); purchase runs never
+# see this table. Set from published benchmarks only (spec/facts/F7_benchmarks_priors.md), never
+# from a client's own data, so that scoring against that data stays meaningful.
+lead_records:
+  cvr:
+    family: beta
+    params: {a: 2.2, b: 22.0}               # leads per link click: median 8%, 90% 1.9% to 20%, worth ~24 clicks
+    elicitation:
+      source: ai_proposal
+      rationale: "F7 benchmarks: Meta to landing page 10.5% (WordStream 2019), landing pages 6.6% median (Unbounce 2024), Instant Forms 8.5% (WordStream 2026); central 7%, 90% 2% to 22%, fitted as a Beta on the log scale"
+      author: claude
+      approved_by: owner
+      approved_at: "2026-11-10T00:00:00Z"
 elicitation:
   source: human
   rationale: "Manuscript ch. 2 and 4 teaching priors, approved as framework defaults (spec v0.3 §14)"

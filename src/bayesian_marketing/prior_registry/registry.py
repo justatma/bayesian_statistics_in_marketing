@@ -174,8 +174,10 @@ def _frozen_dist(family: str, params: dict[str, float]) -> Any:
     return None
 
 
-def predictive_check(record: PriorRecord) -> dict[str, float]:
-    """C6. Raises PriorRefused when the prior's 99th percentile exceeds the path's ceiling."""
+def predictive_check(record: PriorRecord, *, conversion_kind: str = "purchase") -> dict[str, float]:
+    """C6. Raises PriorRefused when the prior's 99th percentile exceeds the path's ceiling.
+
+    ``conversion_kind`` (prior learning R3): skeleton, accepted and not yet used (L6)."""
     ceiling = _ceiling(record.parameter_path)
     if ceiling is not None and record.family != "beta":
         raise PriorRefused(
@@ -204,8 +206,10 @@ def predictive_check(record: PriorRecord) -> dict[str, float]:
     return out
 
 
-def approve(prior_id: str, approver: str) -> PriorRecord:
-    """Approve after the prior predictive check (C6). Called by atmaos.approve_prior only."""
+def approve(prior_id: str, approver: str, *, conversion_kind: str = "purchase") -> PriorRecord:
+    """Approve after the prior predictive check (C6). Called by atmaos.approve_prior only.
+
+    ``conversion_kind`` (prior learning R3): skeleton, accepted and not yet used (L6)."""
     if not approver:
         raise ValueError("approve needs an approver")
     rec = _read_record(prior_id)
@@ -269,7 +273,8 @@ def _as_dt(v: Any) -> datetime:
     return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
-def _default_prior(parameter_path: str) -> PriorRecord | None:
+def _default_prior(parameter_path: str, *, conversion_kind: str = "purchase") -> PriorRecord | None:
+    # conversion_kind (prior learning R1): skeleton, accepted and not yet used (L6)
     reg = registries.load("priors/default")
     version = str(reg["version"])
     for table, elic_key in (("records", "elicitation"), ("pending_records", "pending_elicitation")):
@@ -314,7 +319,9 @@ def _g8(parameter_path: str, client_id: str, as_of: datetime, reason: str) -> Ga
     return GateFailure(res)
 
 
-def resolve(parameter_path: str, client_id: str, as_of: datetime) -> PriorRecord:
+def resolve(
+    parameter_path: str, client_id: str, as_of: datetime, *, conversion_kind: str = "purchase"
+) -> PriorRecord:
     """Client, then vertical, then default; every hop recorded (C2). Unapproved fails G8.
 
     Proposals whose elicitation was created after ``as_of`` are invisible. Approval time is not
@@ -332,7 +339,7 @@ def resolve(parameter_path: str, client_id: str, as_of: datetime) -> PriorRecord
             )
         return _rebuild(client, resolution_path=[f"client:{client_id}:{client.prior_id}"])
     hops = [f"client:{client_id}:none", "vertical:unmapped"]
-    default = _default_prior(parameter_path)
+    default = _default_prior(parameter_path, conversion_kind=conversion_kind)
     if default is None:
         raise RegistryError(f"no prior for {parameter_path!r}: no client, vertical or default")
     return _rebuild(default, resolution_path=[*hops, default.resolution_path[0]])

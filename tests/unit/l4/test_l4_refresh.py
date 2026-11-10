@@ -11,14 +11,14 @@ from tests.fakes.live import FakeStore, FixedClock
 
 from bayesian_marketing import core as C
 from bayesian_marketing.live.contracts import PollRecord
-from bayesian_marketing.live.refresh import ONE_AD, _data_dir, refresh
+from bayesian_marketing.live.refresh import ONE_AD, data_dir_env, refresh
 
 
 def test_data_dir_context_removes_a_variable_that_was_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("BAYES_DATA_DIR", raising=False)
-    with pytest.raises(RuntimeError), _data_dir(tmp_path):
+    with pytest.raises(RuntimeError), data_dir_env(tmp_path):
         assert os.environ["BAYES_DATA_DIR"] == str(tmp_path)
         raise RuntimeError("x")
     assert "BAYES_DATA_DIR" not in os.environ

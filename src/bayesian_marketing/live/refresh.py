@@ -95,7 +95,7 @@ def _outcome(
             horizon=_horizon(),
             conversion_kind=_conversion_kind(config),
         )
-        with _data_dir(data_dir):
+        with data_dir_env(data_dir):
             ctx = pipeline.execute(manifest, request, manifest_dir=config_root, pulls=[pull])
         return "ran", None, ctx.result.run.run_id
     except GateFailure as exc:
@@ -115,7 +115,7 @@ def _gate_text(exc: GateFailure) -> str:
 
 
 @contextmanager
-def _data_dir(path: Path) -> Iterator[None]:
+def data_dir_env(path: Path) -> Iterator[None]:
     """Point the engine at ``path`` for the call; put the variable back, even on an exception."""
     before = os.environ.get("BAYES_DATA_DIR")
     os.environ["BAYES_DATA_DIR"] = str(path)
