@@ -87,6 +87,7 @@ live:  # live view §5 L3; the templates read these, never hard-code them
   no_prior_score: "No prior score yet."
   prior_score_stale: "Scored before the latest poll."
   prior_score_note: "Log score treats ads as independent under a fixed prior: exact for the per-ad model, approximate for the joint model."
+  prior_score_unreadable: "Latest prior score could not be read: {reason}."
   tail_low: "data below what the prior expected"
   tail_high: "data above what the prior expected"
 live_columns:  # live view table and header labels (build log B13); view.py maps field keys to these
@@ -98,6 +99,7 @@ live_columns:  # live view table and header labels (build log B13); view.py maps
   clicks: "Link clicks"
   spend: "Spend"
   ctr: "CTR"
+  cvr: "Conversions per link click"
   cpc: "CPC"
   conversions_reported: "Count"
   cost_per_conversion: "Cost each"
