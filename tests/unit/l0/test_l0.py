@@ -71,7 +71,7 @@ def test_client_configs() -> None:
     j = load_client("jovannah")
     assert j.accounts["meta"].startswith("act_") and j.economics_path == "economics/jovannah.json"
     assert j.conversion_event == {"meta": "offsite_conversion.fb_pixel_lead"}  # D44
-    assert j.conversion_event_confirmed == {} and j.priors == {}  # provisional; priors not yet
+    assert j.conversion_event_confirmed == {"meta": True} and j.priors == {}  # confirmed (D47)
     assert [c.client_id for c in all_clients()] == sorted(c.client_id for c in all_clients())
     with pytest.raises(ValueError):
         load_client("../x")
