@@ -174,3 +174,9 @@ Frozen files, sha256 (the merge gate refuses any branch that changes them):
 | File | sha256 |
 |---|---|
 | `tests/acceptance/test_L5.py` | `f76d293671cb20820d3fd11d1ffe5c1d310998a6becc7bcb85cebe76763aa8c9` |
+
+L5 amendment (integrator, 2026-11-09): line 207 read `Recommendation.notices`, a field the model does not have, so `test_L5_lead_run_derives_no_value` could not pass on any code (builder's open question 1). It now checks the recommendation's JSON for `contribution_per_click` and "contribution per click". Still 12 failed, 1 passed on the unfixed code. New hash replaces the one above:
+
+| File | sha256 |
+|---|---|
+| `tests/acceptance/test_L5.py` | `1b3497809df2636b64d67d150fec865f274534ab3bd0492208aae4ffe5196eed` |

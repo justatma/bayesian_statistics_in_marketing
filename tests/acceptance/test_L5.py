@@ -204,7 +204,8 @@ def test_L5_lead_run_derives_no_value(env: Env) -> None:
             assert snap.not_estimable[ad][name] == LEAD_TEXT  # D46 (2)
     assert snap.notices.count(LEAD_TEXT) == 1  # D46 (3)
     for r in snap.recommendations:  # nothing priced from a lead reaches a recommendation
-        assert "contribution per click" not in " ".join(r.notices)
+        text = r.model_dump_json()
+        assert "contribution_per_click" not in text and "contribution per click" not in text
 
 
 def test_L5_purchase_run_is_unchanged(env: Env) -> None:
