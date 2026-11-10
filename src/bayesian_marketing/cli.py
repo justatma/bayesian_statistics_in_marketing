@@ -401,13 +401,8 @@ def live(args: argparse.Namespace) -> int:
             _say("Pruned", f"{len(removed)} recording directories")
             return 0
         if args.live_command == "score-priors":
-            from bayesian_marketing.live.prior_score import score_priors, write_score
-
             cfg = live_config.load_client(args.client, croot)
-            score = score_priors(cfg, store, clock, data_dir=data_dir)
-            path = write_score(score, data_dir)
-            _say("Priors", f"{cfg.client_id}: scored, {path.name}")  # L7 prints the table
-            return 0
+            return 0 if _score_priors(cfg, store, clock, data_dir, table=True) else 1
         if args.live_command == "refresh":
             cfg = live_config.load_client(args.client, croot)
             last = store.latest_poll(cfg.client_id)
@@ -454,9 +449,44 @@ def live(args: argparse.Namespace) -> int:
                 "Refresh",
                 f"{cfg.client_id}: {rr.status}" + (f" ({rr.reason})" if rr.reason else ""),
             )
+            _score_priors(cfg, store, clock, data_dir, table=False)  # R18: never fails the poll
         return 1 if failed else 0
     finally:
         store.close()
+
+
+def _score_priors(cfg: Any, store: Any, clock: Any, data_dir: Path, *, table: bool) -> bool:
+    """Score and write the client's priors (prior learning §5 CLI). A failure prints one line and
+    returns False; it never raises (R18). ``table`` prints one line per (path, candidate)."""
+    from bayesian_marketing.live import prior_score as ps
+
+    try:
+        score = ps.score_priors(cfg, store, clock, data_dir=data_dir)
+        path = ps.write_score(score, data_dir)
+    except Exception as e:
+        _say("Priors", f"{cfg.client_id}: scoring failed: {type(e).__name__}: {e}")
+        return False
+    if not score.paths:  # R18: one line
+        why = "; ".join(f"{k}: {v}" for k, v in score.not_scored.items())
+        _say("Priors", f"{cfg.client_id}: nothing scored ({why}), {path.name}")
+        return True
+    if not table:
+        n_cands = sum(len(c) for c in score.paths.values())
+        _say("Priors", f"{cfg.client_id}: {_count(n_cands, 'candidate')} scored, {path.name}")
+        return True
+    for p, cands in score.paths.items():
+        for c in cands:
+            params = ", ".join(f"{k}={v:g}" for k, v in c.params.items())
+            _say(
+                "Priors",
+                f"{p} {c.role}: {c.family}({params}) {c.prior_id}, "
+                f"{c.n_ads} ads scored, {c.n_surprised} surprised, "
+                f"log score {c.log_score:.3f}, log BF vs in force {c.log_bf_vs_in_force:+.3f}",
+            )
+    for k, v in score.not_scored.items():
+        _say("Not scored", f"{k}: {v}")
+    _say("Wrote", str(path))
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:

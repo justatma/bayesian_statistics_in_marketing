@@ -116,6 +116,40 @@
 </table>
 {% endif %}
 {% endif %}
+
+{# Prior learning §5 Page: an h3 at the end of the engine section, not a sixth h2 (B18). #}
+<h3>{{ live.priors_title }}</h3>
+{% set priors = poll.priors %}
+{% if priors.sentence %}
+<p>{{ priors.sentence }}</p>
+{% else %}
+<p>{{ cols.scored_at }}: {{ priors.scored_at }}{% if priors.stale %} {{ priors.stale }}{% endif %}</p>
+<p>{{ priors.note }}</p>
+{% for p in priors.paths %}
+<h4><code>{{ p.path }}</code></h4>
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead><tr><th>{{ cols.role }}</th><th>{{ cols.prior }}</th><th>{{ cols.ads_surprised }}</th><th>{{ cols.log_score_vs_in_force }}</th></tr></thead>
+<tbody>
+{% for r in p.candidates %}
+<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+{% if p.ads %}
+<table border="1" cellpadding="4" style="border-collapse: collapse; margin: 0.5rem 0 1rem">
+<thead><tr><th>{{ cols.in_force }}: {{ cols.ad }}</th><th>{{ cols.trials }}</th><th>{{ cols.successes }}</th><th>{{ cols.raw_rate }}</th><th>{{ cols.prior_range }}</th><th>{{ cols.tail }}</th><th>{{ cols.prior_weight }}</th><th>{{ cols.shrinkage }}</th></tr></thead>
+<tbody>
+{% for a in p.ads %}
+<tr><td>{% if a.name %}{{ a.name }} {% endif %}<code>{{ a.id }}</code></td>{% for c in a.cells %}<td class="n">{{ c }}</td>{% endfor %}</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% endfor %}
+{% for n in priors.not_scored %}
+<p><code>{{ n }}</code></p>
+{% endfor %}
+{% endif %}
 </main>
 {% endif %}
 <footer style="margin-top: 2rem; color: #555"><p>{{ watermark }}</p></footer>

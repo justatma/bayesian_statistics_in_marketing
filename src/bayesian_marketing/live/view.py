@@ -21,12 +21,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import jinja2
+from scipy import stats
 
 from bayesian_marketing import pipeline
 from bayesian_marketing.core import registries
 from bayesian_marketing.core.records import ClientConfig
 from bayesian_marketing.floors.estimability import event_floor
 from bayesian_marketing.live.contracts import Clock, LiveRow, PollRecord, Store
+from bayesian_marketing.live.prior_score import load_latest_score
 from bayesian_marketing.live.registry import LiveRegistry
 from bayesian_marketing.reporting.render import finding_lines, not_knowable_lines
 
@@ -388,6 +390,67 @@ def _engine(
     return engine
 
 
+def _pct(x: float, places: int) -> str:
+    return f"{x * 100:.{places}f}%"
+
+
+def _priors(
+    client_id: str, data_dir: Path, last_ok: PollRecord, live: dict[str, str],
+    cols: dict[str, str], places: int,
+) -> dict[str, Any]:  # fmt: skip
+    """Prior learning §5 Page, R8, R16: the latest score file, read only; the page never scores."""
+    score = load_latest_score(client_id, data_dir)
+    if score is None:
+        return {"sentence": live["no_prior_score"], "paths": []}
+
+    def rng(lo: float, hi: float) -> str:
+        return f"[{_pct(lo, places)}, {_pct(hi, places)}]"
+
+    paths = []
+    for path, cands in score.paths.items():
+        rows = []
+        for c in cands:
+            a, b = c.params["a"], c.params["b"]
+            lo, hi = (float(stats.beta(a, b).ppf(q)) for q in (0.05, 0.95))
+            rows.append(
+                [
+                    cols.get(c.role, c.role),
+                    f"{_pct(a / (a + b), places)} ({rng(lo, hi)})",
+                    f"{c.n_surprised} / {c.n_ads}",
+                    f"{c.log_bf_vs_in_force:+.2f}",
+                ]
+            )
+        ads = []
+        for ad in next((c.ads for c in cands if c.role == "in_force"), []):
+            tail = f"{ad.tail:.3f}"
+            if ad.surprised:
+                tail += " " + (live["tail_low"] if ad.tail < 0.5 else live["tail_high"])  # R7
+            ads.append(
+                {
+                    "name": ad.ad_name or "",
+                    "id": ad.ad_id,
+                    "cells": [
+                        str(ad.n),
+                        str(ad.k),
+                        _pct(ad.raw_rate, places),
+                        rng(ad.prior_q05, ad.prior_q95),
+                        tail,
+                        _pct(ad.prior_weight, places),
+                        f"{ad.shrinkage * 100:+.{places}f}%",
+                    ],
+                }
+            )
+        paths.append({"path": path, "candidates": rows, "ads": ads})
+    return {
+        "sentence": None,
+        "scored_at": f"{fmt_utc(score.scored_at)} UTC",
+        "stale": live["prior_score_stale"] if score.scored_at < last_ok.started_at else None,
+        "note": live["prior_score_note"],
+        "paths": paths,
+        "not_scored": [f"{k}: {v}" for k, v in score.not_scored.items()],
+    }
+
+
 # ------------------------------------------------------------------ pages
 
 
@@ -472,6 +535,7 @@ def render(
         "floors": floors,
         "budget": budget,
         "engine": _engine(store, client_id, phrasing, data_dir, live),
+        "priors": _priors(client_id, data_dir, last_ok, live, cols, rounding["percent_decimals"]),
         "levels": LEVELS,
         "finding_keys": _FINDING_KEYS,
         "diag_keys": ("route", *_DIAG_KEYS),
