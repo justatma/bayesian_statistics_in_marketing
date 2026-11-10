@@ -166,3 +166,11 @@ Frozen files, sha256 (the merge gate refuses any branch that changes them):
 | `tests/acceptance/test_L2.py` | `366cf3d61032fe1447b60c11cefd4a468032456f38fbfb7c9f4ca97426b14ab8` |
 | `tests/acceptance/test_L3.py` | `a5d18a05ac8f727cbdeea02cb2262fb95c229108f016b2eeafdf37ffc15f686a` |
 | `tests/acceptance/test_L4.py` | `afafa8598b6c78581a933af59c59f9b6f1db6dd7afc434f2aacbc343fcfb70b0` |
+
+## L5 freeze (integrator, 2026-11-09, D46)
+
+`tests/acceptance/test_L5.py`, written by the integrator (not the builder). Before the fix: 12 failed, 1 passed. The passing test (`test_L5_purchase_run_is_unchanged`) guards the default. Each failure is the bug or the missing contract: `LEAD_NOT_VALUED` and `CompareRequest.conversion_kind` absent, `contribution_per_click` derived from leads, non-rate metrics not refused.
+
+| File | sha256 |
+|---|---|
+| `tests/acceptance/test_L5.py` | `f76d293671cb20820d3fd11d1ffe5c1d310998a6becc7bcb85cebe76763aa8c9` |
