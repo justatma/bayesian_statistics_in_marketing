@@ -180,3 +180,87 @@ L5 amendment (integrator, 2026-11-09): line 207 read `Recommendation.notices`, a
 | File | sha256 |
 |---|---|
 | `tests/acceptance/test_L5.py` | `1b3497809df2636b64d67d150fec865f274534ab3bd0492208aae4ffe5196eed` |
+
+## L6 and L7 (prior learning spec v0.2, §6 as amended by §8), written 2026-11-10
+
+Files: `tests/acceptance/test_L6.py` (17 tests as collected: 15 functions, one parametrized x3), `tests/acceptance/test_L7.py` (26 tests). Both read the lead record (`lead_records.cvr`) and the purchase records from `registries/priors/default.yaml`, the ceilings from `bounds.yaml` and the surprise tail from `bounds.yaml` `prior_scoring` at test time; none of their numbers is in the tests. A test that needs the lead record calls `pytest.fail` with a plain message when the table is absent, so collection never errors. Expected scores are computed in the test with `scipy.stats.betabinom` and `scipy.stats.beta`, with the log pmf cross-checked against the closed form.
+
+Run before the build, `BAYES_PIECES=L6,L7`: L6 8 failed, 9 passed; L7 25 failed, 1 passed. Every passing test is a deliberate guard, marked "Guard" in its docstring or below. Without `BAYES_PIECES` all 43 skip. `ruff check` and `ruff format --check` pass on both files.
+
+### test_L6.py
+| test | spec clause | before the build |
+|---|---|---|
+| test_L6_lead_cvr_resolves_to_the_lead_default | C1 id formula with `"table": "lead_records"`, resolution path last hop, R1 evidence ref, C4 approved by its own elicitation | fails: `resolve` body unchanged, returns the purchase id |
+| test_L6_paths_absent_from_lead_records_resolve_as_purchase [ctr, conversions_per_dollar, cpm_impressions_per_dollar] | C1 last sentence | passes, guard |
+| test_L6_purchase_cvr_id_is_pinned_to_the_base_formula | R15, C3 | passes, guard |
+| test_L6_client_cvr_prior_wins_over_the_lead_default_in_the_registry | C1 client hop unchanged | passes, guard |
+| test_L6_resolve_priors_lead_without_client_priors | C2, C4 (G8 passes on client data), R2 | fails: unchanged resolve body |
+| test_L6_requested_purchase_default_id_on_a_lead_run_fails_g8 | §6 L6, C2, R13 | fails: no G8, the purchase id still resolves |
+| test_L6_requested_lead_default_id_on_a_lead_run_passes_g8 | C2 | fails: G8 refuses the lead id |
+| test_L6_purchase_resolve_priors_unchanged | C3, R15 | passes, guard |
+| test_L6_lead_run_snapshot_names_the_lead_default | §6 L6, C5, R2 (no `records.cvr` id in the snapshot) | fails: snapshot `priors["cvr"]` is the purchase id |
+| test_L6_client_cvr_prior_wins_on_a_lead_run | §6 L6, C1 | passes, guard |
+| test_L6_lead_run_requesting_the_purchase_default_is_skipped_by_g8 | R13 through `refresh` | fails: the run is `ran`, not `skipped` |
+| test_L6_purchase_run_ids_and_seed_equal_the_base | §6 L6, C3, R15: run id, seed and prior ids equal with `conversion_kind` explicit and left at default, at a frozen `utcnow`, and equal to the base formulas | passes, guard |
+| test_L6_lead_default_passes_the_predictive_check_under_the_lead_ceiling | R3 | fails: `predictive_check` ignores the kind, ceiling 0.5 not 0.8 |
+| test_L6_purchase_predictive_check_keeps_the_purchase_ceiling | R3, C3 | passes, guard |
+| test_L6_client_lead_prior_between_the_ceilings_approved_only_as_lead | R3: Beta(4, 8), q99 0.66, refused with the default kind, approved with `conversion_kind="lead"` | fails: `approve` ignores the kind and refuses |
+
+### test_L7.py
+| test | spec clause | before the build |
+|---|---|---|
+| test_L7_two_ads_match_hand_computed_betabinomial_values | §6 L7, §5 per-ad table, R7 tail, R17, sums, log BF vs in_force, R12 days | fails: NotImplementedError (`score_priors`) |
+| test_L7_tail_at_k_zero_is_half_the_pmf | R7 (cdf term is 0 at k = 0), R6 cvr no trials, R12 | fails: NotImplementedError |
+| test_L7_rows_merge_per_ad_and_date_with_the_later_ok_poll_winning | R4: later poll wins per (ad, date), polls inserted out of order, error poll rows and interrupted poll ignored, rows with no ad id ignored; R12 days | fails: NotImplementedError |
+| test_L7_cvr_prefers_observed_drops_none_rows_and_rounds_half_up | R5: observed preferred, None rows and their clicks dropped, 2.5 rounds to 3, "no rows with conversions" | fails: NotImplementedError |
+| test_L7_skip_reasons_for_ctr_and_cvr | R6 three strings, R8 same ad set for every candidate | fails: NotImplementedError |
+| test_L7_purchase_client_candidates_ordered_and_deduplicated | R9 order, framework_lead for cvr always, dedup; resolution verbatim | fails: NotImplementedError |
+| test_L7_lead_client_candidates_ordered_and_deduplicated | R9 first role wins on a collision, kind from `meta.is_lead_event` | fails: NotImplementedError |
+| test_L7_client_priors_give_every_role_and_bayes_factors_against_in_force | R9 three roles, R8 log BF relative to in_force | fails: NotImplementedError |
+| test_L7_equal_params_with_different_ids_are_both_shown | R9 last sentence | fails: NotImplementedError |
+| test_L7_score_reads_the_registry_under_data_dir_and_writes_nothing | R10, §5 "never writes" | fails: NotImplementedError |
+| test_L7_non_beta_prior_is_listed_as_not_scored | §5 only Beta scored, R12 `"<path>:<prior_id>"` key | fails: NotImplementedError |
+| test_L7_path_with_no_scored_ads_is_in_not_scored | R12 `"<path>"` key, "no ads with data" | fails: NotImplementedError |
+| test_L7_no_rows_gives_empty_paths_and_reasons | R18, R12 | fails: NotImplementedError |
+| test_L7_write_score_names_the_file_from_scored_at | §5, R11 name and JSON (ISO strings), R8 key `log_bf_vs_in_force` | fails: NotImplementedError (`write_score`) |
+| test_L7_write_score_never_overwrites_and_suffixes_collisions | §6 L7, R11 `-2`, `-3` | fails: NotImplementedError |
+| test_L7_write_score_leaves_a_foreign_file_in_place | R11, §5 never overwrites | fails: NotImplementedError |
+| test_L7_load_latest_score_round_trips | R11 `load_latest_score`, dataclasses rebuilt, None when absent | fails: NotImplementedError |
+| test_L7_empty_score_round_trips | R18 file written with empty paths | fails: NotImplementedError |
+| test_L7_cli_score_priors_writes_a_file_and_prints_a_line_per_candidate | §5 CLI, §6 line format | fails: NotImplementedError through `cli.main` |
+| test_L7_cli_score_priors_with_no_data_writes_and_exits_zero | R18 CLI | fails: NotImplementedError |
+| test_L7_live_poll_runs_the_scoring_after_refresh | §5 CLI, R18 (scores after a skipped refresh) | fails: `live poll` never calls the scorer, no file |
+| test_L7_a_failing_scorer_never_fails_live_poll | §6 L7, R18 | fails: the scorer is never called (`calls == []`) |
+| test_L7_page_without_a_score_file_says_so | §5 Page, R16 `no_prior_score` | fails: no Priors heading on the page |
+| test_L7_page_with_a_score_file_shows_candidates_and_in_force_ads | §5 Page headings from `live_columns`, R8 note, R7 tail_low and tail_high, R16 scored_at | fails: NotImplementedError (`write_score`) |
+| test_L7_page_marks_a_score_older_than_the_latest_ok_poll_stale | R16 stale mark | fails: NotImplementedError (`write_score`) |
+| test_L7_constants_match_the_spec | R5, R6, R9, R12, R17 names and strings in the skeleton | passes, guard |
+
+### How the tests drive the code
+
+`score_priors` runs on `FakeStore` and `FixedClock` with client priors proposed only under a temp `data_dir`, so R10 is checked by the client prior being found. The non-Beta case edits `records.ctr` in the isolated registry copy (`iso.edit_yaml`), because `approve` refuses a non-Beta prior on a rate path. `write_score`, `load_latest_score` and the page tests use a hand-built `PriorScore`, so they depend on neither `score_priors` nor L6. The CLI tests set `BAYES_LIVE_DIR`, `BAYES_CONFIG_DIR` and `BAYES_DATA_DIR` to temp directories and seed a `SqliteStore`. `live poll` runs without network: `live.poll.poll` is replaced by a fake that writes one ok poll, and the config has no economics path so the real `refresh` is skipped quickly. The failing scorer is patched on `live.prior_score` (and on `cli` if a builder imports it there).
+
+The L7 files were checked against a throwaway reference implementation kept outside the repo: 37 of 43 pass on it (the 6 others are the CLI, poll and page tests, which it does not implement). That run found and fixed one test that assumed `paths["cvr"]` exists when cvr has no scored ad.
+
+### Open points for the integrator
+
+1. Dependency: every L7 test that names `framework_lead` or the lead id needs L6. Build L7 on top of L6 or merge L6 first.
+2. Frozen L3 conflict: `test_L3_h1_and_five_h2_strings` asserts exactly five h2 headings, and §5 Page adds a Priors section after the engine section. The L7 page tests accept the Priors title as an h2 or an h3 heading after the Engine h2, so an h3 keeps the frozen L3 test passing; an h2 breaks it.
+3. R11 order: `20261110T180000Z-2.json` sorts before `20261110T180000Z.json` (`-` is below `.`), so "lexicographically last" picks the unsuffixed file over its later collision. The tests do not pin which of two same-second files is latest; they use distinct seconds.
+4. Not fixed by the spec, and so accepted either way by the tests: whether a path with no scored ad is absent from `paths` or present with empty candidates; which role name the ctr purchase default carries when a client ctr prior is in force (`framework_lead` comes first in R9 and resolves ctr to the purchase default); the CLI line's number formats (the test checks path, role key or its `live_columns` label, family, ads scored and ads surprised on a distinct line per candidate); the page's number formats and the scored_at format (ISO, or `%Y-%m-%d %H:%M` UTC).
+5. R18 "a scoring failure prints one line": the test asks for the exception's message in the output, not a format.
+6. The lead default now in the file, Beta(2.2, 22), has q99 of about 0.28, under the purchase ceiling as well. The predictive check test therefore tells the kinds apart by the ceiling it reports (0.80), and the R3 approval test uses its own Beta(4, 8) client prior, whose q99 sits between the two ceilings.
+
+| File | sha256 (before any freeze) |
+|---|---|
+| `tests/acceptance/test_L6.py` | `9afaf3fa3cf38554b7a31bb812f3991f712a587044f4f5281b2482df174e143d` |
+| `tests/acceptance/test_L7.py` | `70273f0b4169bb09ea7eabfdf07abe5aa01be4d639ea7d618b21f3e84bb90126` |
+
+## L6 and L7 freeze (integrator, 2026-11-10)
+
+Checked by the integrator: 33 failed, 10 passed before the build; every failure is the unchanged `resolve` and `predictive_check` bodies, NotImplementedError in `prior_score`, or the missing scorer call and page section; the 10 passes are the guards the writer lists. Rulings on the writer's open points are build log B18.
+
+| File | sha256 |
+|---|---|
+| `tests/acceptance/test_L6.py` | `9afaf3fa3cf38554b7a31bb812f3991f712a587044f4f5281b2482df174e143d` |
+| `tests/acceptance/test_L7.py` | `70273f0b4169bb09ea7eabfdf07abe5aa01be4d639ea7d618b21f3e84bb90126` |
