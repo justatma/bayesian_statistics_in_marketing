@@ -10,6 +10,11 @@ additional volume in the horizon's unit, priced at the observed unit cost of the
 (spend per click, per impression or per day). When ``required`` is None (floors does not project
 it), the volume is projected here by §6.1 variance scaling and labelled approximate. A cost above
 ``test_budget``, an unprojectable or unpriceable volume, or no test budget gives ``not_knowable``.
+
+D51 (U1): under a count unit the expected loss is priced at the comparison's replacement cost
+(``decision.units.in_money``) in the projection, in the recommendation's ``expected_loss`` and in
+the guarantee. With no replacement cost there is no money loss: the projection returns None and
+the not_knowable branch carries NO_REPLACEMENT_COST.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ from bayesian_marketing.decision.reallocation import (
     none_guarantee,
     phrasing,
 )
+from bayesian_marketing.decision.units import in_money, is_count, no_cost_reason, unit_params
 
 MIN_MATURITY_REF = "bounds/lag/min_maturity@v1"
 
@@ -103,7 +109,11 @@ def _projected_required(
     """
     assert econ.loss_tolerance is not None
     tol = float(econ.loss_tolerance.amount)
-    loss = min(float(c.expected_loss[o].amount) for o in c.options)
+    best = min(c.options, key=lambda o: c.expected_loss[o].amount)
+    priced = in_money(c, c.expected_loss[best])  # D51 U1: the tolerance is money
+    if priced is None:
+        return None
+    loss = float(priced.amount)
     n_now = _volume(data, rows, c.objective.horizon.unit)
     if n_now <= 0 or tol <= 0 or loss <= tol:
         return None
@@ -150,7 +160,9 @@ def stop_or_continue(
         "min_maturity": min_maturity,
         "immature_cohorts": immature,
         "notices": notices,
+        **unit_params(c),
     }
+    best_loss = in_money(c, c.expected_loss[best])  # D51 U1: money, or None without a cost
 
     def out(action: str, g, **kw: Any) -> Recommendation:
         return build(
@@ -171,16 +183,20 @@ def stop_or_continue(
     if blocked is not None:
         return out("not_knowable", none_guarantee(c, cur, blocked, NEEDS_ECONOMICS, notices))
 
+    if decision.status == "estimable" and best_loss is None:  # D51 U1: no money loss to stop on
+        req = UNPRICED_REQUIREMENT.format(why=no_cost_reason(c))
+        return out("not_knowable", none_guarantee(c, cur, no_cost_reason(c), req, notices))
+
     if decision.status == "estimable":
         if not immature:
             return out(
                 "stop_test",
                 loss_guarantee(c, econ, best, notices),
-                loss=c.expected_loss[best],
+                loss=best_loss,
             )
         req = MATURE_REQUIREMENT.format(maturity=f"{100 * min_maturity:.0f}%")
         g = none_guarantee(c, cur, notices[0], req, notices)
-        return out("continue_test", g, loss=c.expected_loss[best])
+        return out("continue_test", g, loss=best_loss)
 
     # C3: not estimable. Price the remaining volume and compare with the test budget.
     reason = "; ".join(decision.reasons)
@@ -189,7 +205,10 @@ def stop_or_continue(
     if required is None:
         required = _projected_required(c, econ, data, rows)
         if required is None:
-            req = UNPRICED_REQUIREMENT.format(why=NO_PROJECTION.format(unit=unit))
+            why = NO_PROJECTION.format(unit=unit)
+            if is_count(c) and best_loss is None:  # D51 U1
+                why = no_cost_reason(c)
+            req = UNPRICED_REQUIREMENT.format(why=why)
             return out("not_knowable", none_guarantee(c, cur, reason, req, notices))
         notices.append(PROJECTED_NOTICE.format(unit=unit.rstrip("s")))
         params["required_projected"] = True

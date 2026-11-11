@@ -79,6 +79,7 @@ from bayesian_marketing.decision.compare import PLANNED_TARGETS, compare
 from bayesian_marketing.decision.compare import SUPPORTED as COMPARE_SUPPORTED
 from bayesian_marketing.decision.reallocation import base_slots, make_guarantee
 from bayesian_marketing.decision.stopping import MIN_MATURITY_REF, stop_or_continue
+from bayesian_marketing.decision.units import replacement_cost
 from bayesian_marketing.derived_metrics.derive import NotEstimable, derive
 from bayesian_marketing.diagnostics.run import run_diagnostics
 from bayesian_marketing.floors.estimability import (
@@ -940,6 +941,17 @@ def _knowability(
     )
 
 
+def with_unit(c: Comparison, data: FunnelData, currency: str, lead: bool) -> Comparison:
+    """D51 (C2, U4, U9): the comparison's unit and replacement cost, set before
+    ``decision_feasibility`` and ``allocate`` see it. A lead run's orders are leads. Unit money is
+    returned as it is (U5)."""
+    if c.unit == "money":
+        return c
+    unit = "leads" if lead and c.objective.target == "orders" else c.unit
+    cost = replacement_cost(data, c.options, unit, currency)
+    return c.model_copy(update={"unit": unit, "replacement_cost": cost})
+
+
 def execute(
     manifest: DatasetManifest,
     request: CompareRequest,
@@ -1109,7 +1121,12 @@ def execute(
         )
     else:
         assert econ is not None
-        comparison = compare(options, objective, econ)  # type: ignore[arg-type]
+        comparison = with_unit(
+            compare(options, objective, econ),  # type: ignore[arg-type]
+            data,
+            econ.currency,
+            lead,
+        )
         gates.append(_gate("G9", True, [], econ.economics_id))
         decision = decision_feasibility(comparison, econ)
         with _economics_visible(manifest_dir, econ.economics_id):

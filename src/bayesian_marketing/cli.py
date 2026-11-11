@@ -81,24 +81,35 @@ def _count(n: int, word: str) -> str:
     return f"{n:,} {word}" + ("" if n == 1 else "s")
 
 
-def _amount(m: Any, target: str) -> str:
-    """A comparison amount in its objective's unit: money for contribution, else a count of
-    clicks or orders (compare carries those as Money too, §8.1)."""
+def _amount(m: Any, unit: str) -> str:
+    """An amount in its unit: money, or a count of clicks, orders or leads (compare carries those
+    as Money too, §8.1). Comparison amounts use ``c.unit``; recommendation amounts are money
+    (D51 (3), U2)."""
     from bayesian_marketing.decision.reallocation import fmt_money
 
-    if target == "contribution":
+    if unit == "money":
         return fmt_money(m)
-    return f"{float(m.amount):,.1f} {target}"
+    return f"{float(m.amount):,.1f} {unit}"
 
 
-def _verdict(loss: Any, tolerance: Any, target: str) -> str:
-    """The tolerance verdict for one expected loss, with the registry's marginal band (D9)."""
-    from bayesian_marketing.core import registries
+def _rec_money(m: Any, counted: bool) -> str:
+    """A recommendation amount, which is money (D51 U2). From a count comparison it shows cents
+    (unit_money_decimals, B24 F2); a contribution recommendation keeps fmt_money."""
     from bayesian_marketing.decision.reallocation import fmt_money
+    from bayesian_marketing.decision.units import fmt_unit_cost
+
+    return fmt_unit_cost(m) if counted else fmt_money(m)
+
+
+def _verdict(loss: Any, tolerance: Any, counted: bool = False) -> str:
+    """The tolerance verdict for one recommendation's expected loss, which is money (D51 U2),
+    with the registry's marginal band (D9). ``counted``: the tolerance shows cents (B24 F2)."""
+    from bayesian_marketing.core import registries
     from bayesian_marketing.floors.estimability import DECISION_KEY
 
-    if target != "contribution":
-        return f"no money tolerance applies to a loss in {target}"
+    def fmt_money(m: Any) -> str:
+        return _rec_money(m, counted)
+
     if tolerance is None:
         return "no loss tolerance set"
     if tolerance.currency != loss.currency:
@@ -206,13 +217,13 @@ class Narrator:
 
         c = info["comparison"]
         if c is not None:
-            target = c.objective.target
+            unit = c.unit
             best = max(c.p_best, key=c.p_best.get)
             _say("Decision", f"{best} is best with probability {fmt_prob(c.p_best[best])}")
             values = sorted(c.expected_value.items(), key=lambda kv: -float(kv[1].amount))
             some = next(iter(c.expected_value.values()))
             h = horizon_text(c.objective.horizon, some.currency)
-            line = ", ".join(f"{o} {_amount(m, target)}" for o, m in values[:SHOWN_SHARES])
+            line = ", ".join(f"{o} {_amount(m, unit)}" for o, m in values[:SHOWN_SHARES])
             negative = [o for o, m in values if m.amount < 0]
             if negative:
                 line += f"; {len(negative)} of {_count(len(values), 'option')} negative"
@@ -243,6 +254,7 @@ class Narrator:
 
     def _recommendation(self, r: Any, info: dict[str, Any], c: Any, testing: bool = False) -> None:
         from bayesian_marketing.decision.reallocation import horizon_text
+        from bayesian_marketing.decision.units import priced_count
 
         action = ACTIONS.get(r.action, r.action)
         slots = r.guarantee.slots
@@ -267,11 +279,11 @@ class Narrator:
             h = horizon_text(r.horizon, r.expected_loss.currency)
             best = (r.params or {}).get("best", "")
             what = LOSS_FOR[r.action].format(best=best)
-            target = c.objective.target if c is not None else "contribution"
-            verdict = _verdict(r.expected_loss, info["tolerance"], target)
+            counted = priced_count(r.params)
+            verdict = _verdict(r.expected_loss, info["tolerance"], counted)
             _say(
                 "Expected loss",
-                f"{_amount(r.expected_loss, target)} over the next {h} {what}, {verdict}",
+                f"{_rec_money(r.expected_loss, counted)} over the next {h} {what}, {verdict}",
             )
 
 

@@ -5,6 +5,10 @@ test (C2) is: expected benefit of the best eligible candidate over the incumbent
 switching cost, must be > 0, and the decision basis must not be below floor. An option whose
 ``value_q05`` breaches ``survival_floor`` is never recommended (C3).
 
+D51: under a count unit (clicks, orders, leads) the expected loss and benefit are priced at the
+comparison's replacement cost (``decision.units.in_money``) before they meet the tolerance or the
+switching cost, and the survival floor is not tested (it amends C3; one notice instead).
+
 The module also holds the helpers that ``stopping`` and ``allocation`` share (guarantee slots,
 formatting, the Recommendation builder), because the piece's file list has no shared module.
 """
@@ -29,6 +33,14 @@ from bayesian_marketing.core import (
     registries,
 )
 from bayesian_marketing.decision.guarantees import render_guarantee
+from bayesian_marketing.decision.units import (
+    SURVIVAL_NOT_APPLIED,
+    in_money,
+    is_count,
+    no_cost_reason,
+    unit_assumptions,
+    unit_params,
+)
 from bayesian_marketing.floors.estimability import NO_TOLERANCE_REASON
 
 # Phrases with no registry key yet. Each is a requested phrasing.yaml key (manifest open
@@ -127,6 +139,9 @@ def check_currency(c: Comparison, currency: str) -> None:
                 raise ValueError(
                     f"comparison {field}[{option!r}] is in {m.currency}, economics in {currency}"
                 )
+    cost = c.replacement_cost
+    if cost is not None and cost.currency != currency:
+        raise ValueError(f"replacement_cost is in {cost.currency}, economics in {currency}")
 
 
 def economics_block(econ: ClientEconomics) -> str | None:
@@ -148,9 +163,15 @@ def default_scope(c: Comparison, when: date) -> Scope:
 def survival_check(
     c: Comparison, floor: Money | None, options: list[str]
 ) -> tuple[set[str], list[str]]:
-    """Options barred by the survival floor (§8.2 C3), and the notice for each."""
+    """Options barred by the survival floor (§8.2 C3), and the notice for each.
+
+    D51 (C5, U7): a count comparison is never tested against the floor (a dollar floor on value
+    cannot be tested against a count); with a floor set it gets one SURVIVAL_NOT_APPLIED notice.
+    """
     if floor is None:
         return set(), []
+    if is_count(c):
+        return set(), [SURVIVAL_NOT_APPLIED.format(unit=c.unit)]
     blocked: set[str] = set()
     notices: list[str] = []
     q05s = c.value_q05 or {}
@@ -204,7 +225,9 @@ def loss_guarantee(
 ) -> Guarantee:
     if econ.loss_tolerance is None:
         raise ValueError(NO_TOLERANCE_REASON)
-    loss = c.expected_loss[option]
+    loss = in_money(c, c.expected_loss[option])  # D51 C6: the guarantee states money
+    if loss is None:
+        raise ValueError(no_cost_reason(c))
     if loss.currency != econ.currency or econ.loss_tolerance.currency != econ.currency:
         raise ValueError(
             f"expected loss in {loss.currency}, tolerance in {econ.loss_tolerance.currency}, "
@@ -212,23 +235,23 @@ def loss_guarantee(
         )
     slots = base_slots(c, econ.currency) | {
         "option": option,
-        "expected_loss": fmt_money(c.expected_loss[option]),
+        "expected_loss": fmt_money(loss),
         "tolerance": fmt_money(econ.loss_tolerance),
     }
     math = (
-        f"E[loss | choose {option}] = {c.expected_loss[option].amount} "
+        f"E[loss | choose {option}] = {loss.amount} "
         f"; tolerance = {econ.loss_tolerance.amount} ({econ.currency})"
     )
-    return make_guarantee("expected_loss", slots, math, [slots["assumption"], *notices])
+    assumptions = [slots["assumption"], *unit_assumptions(c), *notices]
+    return make_guarantee("expected_loss", slots, math, assumptions)
 
 
 def none_guarantee(
     c: Comparison, currency: str, reason: str, requirement: str, notices: list[str]
 ) -> Guarantee:
     slots = base_slots(c, currency) | {"reason": reason, "requirement": requirement}
-    return make_guarantee(
-        "none", slots, f"no recommendation: {reason}", [slots["assumption"], *notices]
-    )
+    assumptions = [slots["assumption"], *unit_assumptions(c), *notices]
+    return make_guarantee("none", slots, f"no recommendation: {reason}", assumptions)
 
 
 def build(
@@ -339,6 +362,24 @@ def reallocate(
             run_id=run_id,
         )
 
+    if is_count(c) and c.replacement_cost is None:  # D51 C6: nothing to price the counts with
+        notices.extend(survival_check(c, econ.survival_floor, list(c.options))[1])  # U7, B24 F1
+        reason = no_cost_reason(c)
+        g = none_guarantee(c, cur, reason, HOLD_REQUIREMENT.format(option=incumbent), notices)
+        return build(
+            action="not_knowable",
+            c=c,
+            scope=rec_scope,
+            params={"keep": incumbent, "notices": notices, **unit_params(c)},
+            decision=decision,
+            economics_id=econ.economics_id,
+            guarantee=g,
+            expected_benefit=None,
+            expected_loss=None,
+            reversibility="reversible",
+            run_id=run_id,
+        )
+
     cost, platforms = switching_cost(scope, cur)
     reversibility = "reversible"
     if cost is None:
@@ -355,7 +396,11 @@ def reallocate(
     eligible = [o for o in candidates if o not in blocked]
     ev = {o: c.expected_value[o].amount for o in c.options}
     target = max(eligible, key=lambda o: ev[o]) if eligible else None
-    benefit = ev[target] - ev[incumbent] if target is not None else None
+    benefit: Decimal | None = None
+    if target is not None:  # D51 C6: priced before it meets the switching cost
+        priced = in_money(c, Money(amount=ev[target] - ev[incumbent], currency=cur))
+        assert priced is not None  # a count unit without a cost returned above
+        benefit = priced.amount
     net = benefit - cost_amt if benefit is not None else None
 
     params: dict[str, Any] = {
@@ -366,6 +411,7 @@ def reallocate(
         "currency": cur,
         "expected_benefit_before_switching_cost": None if benefit is None else str(benefit),
         "net_benefit": None if net is None else str(net),
+        **unit_params(c),
     }
 
     if blocked >= set(c.options):  # §8.2 C3: no option may be recommended, not even holding
@@ -399,7 +445,7 @@ def reallocate(
             economics_id=econ.economics_id,
             guarantee=g,
             expected_benefit=None,
-            expected_loss=c.expected_loss[incumbent],
+            expected_loss=in_money(c, c.expected_loss[incumbent]),
             reversibility=reversibility,
             run_id=run_id,
         )
@@ -415,7 +461,7 @@ def reallocate(
             economics_id=econ.economics_id,
             guarantee=loss_guarantee(c, econ, target, notices),
             expected_benefit=money(net, cur),
-            expected_loss=c.expected_loss[target],
+            expected_loss=in_money(c, c.expected_loss[target]),
             reversibility=reversibility,
             run_id=run_id,
         )
@@ -435,7 +481,7 @@ def reallocate(
         economics_id=econ.economics_id,
         guarantee=loss_guarantee(c, econ, incumbent, notices),
         expected_benefit=None,
-        expected_loss=c.expected_loss[incumbent],
+        expected_loss=in_money(c, c.expected_loss[incumbent]),
         reversibility=reversibility,
         run_id=run_id,
     )

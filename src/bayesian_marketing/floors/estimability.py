@@ -20,6 +20,7 @@ from bayesian_marketing.core import (
     utcnow,
 )
 from bayesian_marketing.core.scope import STATUS_ORDER
+from bayesian_marketing.decision.units import in_money, no_cost_reason
 
 RATE_KEY = "bounds/estimability/posterior_width"
 DECISION_KEY = "bounds/estimability/decision_loss"
@@ -172,6 +173,11 @@ def decision_feasibility(c: Comparison, econ: ClientEconomics) -> Feasibility:
 
     Rate statuses are not consulted (D9 C2). With no tolerance the decision is below floor with
     the reason "no loss tolerance set" (D16); G9 itself belongs to compare.
+
+    D51 (C4, U9): under a count unit the loss is priced at the comparison's replacement cost
+    before the tolerance test, so ``available`` is money. The checks run in order: no tolerance
+    (D16), then no replacement cost (below floor, NO_REPLACEMENT_COST). ``available`` is 0.0 when
+    there is no money amount.
     """
     if c.economics_id != econ.economics_id:
         raise ValueError(
@@ -180,10 +186,10 @@ def decision_feasibility(c: Comparison, econ: ClientEconomics) -> Feasibility:
     if not c.expected_loss:
         raise ValueError("comparison has no expected losses")
     best = min(c.expected_loss, key=lambda o: c.expected_loss[o].amount)
-    loss = c.expected_loss[best]
+    loss = in_money(c, c.expected_loss[best])
     bound_ref = _ref(DECISION_KEY)
     multiplier = float(registries.resolve(bound_ref)["marginal_multiplier"])
-    loss_amt = float(loss.amount)
+    loss_amt = 0.0 if loss is None else float(loss.amount)
 
     tol_money = econ.loss_tolerance
     if tol_money is None:
@@ -194,7 +200,18 @@ def decision_feasibility(c: Comparison, econ: ClientEconomics) -> Feasibility:
             available=loss_amt,
             required=None,
             target=0.0,
-            reasons=[NO_TOLERANCE_REASON],
+            reasons=[NO_TOLERANCE_REASON] + ([] if loss is not None else [no_cost_reason(c)]),
+            checked_at=utcnow(),
+        )
+    if loss is None:
+        return Feasibility(
+            status="below_floor",
+            basis="decision_loss",
+            bound_ref=bound_ref,
+            available=0.0,
+            required=None,
+            target=float(tol_money.amount),
+            reasons=[no_cost_reason(c)],
             checked_at=utcnow(),
         )
     if tol_money.currency != loss.currency:

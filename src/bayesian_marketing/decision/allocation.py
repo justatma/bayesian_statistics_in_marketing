@@ -11,6 +11,10 @@ that n eligible options cannot meet are relaxed and disclosed (``share_bounds``)
 approval_required`` call ``allocate`` with no economics file and require an allocation; the
 split carries a below-floor decision feasibility and a notice that says why. An allocation is
 the hedged action: it keeps every allowed arm funded, so it is not a confident single choice.
+
+D51 (U6): under a count unit the share-weighted expected loss is priced at the comparison's
+replacement cost (None without one; the decision then carries NO_REPLACEMENT_COST), and the
+survival floor is not tested (one notice). The D30 no-economics branch is unchanged.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from bayesian_marketing.core import (
     ClientEconomics,
     Comparison,
     Feasibility,
+    Money,
     NotInScope,
     Recommendation,
     load_economics,
@@ -40,6 +45,7 @@ from bayesian_marketing.decision.reallocation import (
     none_guarantee,
     survival_check,
 )
+from bayesian_marketing.decision.units import in_money, is_count, unit_assumptions, unit_params
 from bayesian_marketing.floors.estimability import DECISION_KEY, decision_feasibility
 
 MIN_SHARE_REF = "bounds/allocation/min_arm_share@v1"
@@ -151,7 +157,7 @@ def allocate(c: Comparison, run_id: str) -> Recommendation:
             action="not_knowable",
             c=c,
             scope=default_scope(c, decision.checked_at.date()),
-            params={"allocation": {}, "notices": notices},
+            params={"allocation": {}, "notices": notices, **unit_params(c)},
             decision=decision,
             economics_id=c.economics_id,
             guarantee=none_guarantee(c, cur, reason, NO_ECONOMICS_REQUIREMENT, notices),
@@ -174,7 +180,11 @@ def allocate(c: Comparison, run_id: str) -> Recommendation:
             action="not_knowable",
             c=c,
             scope=scope,
-            params={"allocation": dict.fromkeys(c.options, 0.0), "notices": notices},
+            params={
+                "allocation": dict.fromkeys(c.options, 0.0),
+                "notices": notices,
+                **unit_params(c),
+            },
             decision=decision,
             economics_id=c.economics_id,
             guarantee=g,
@@ -192,9 +202,10 @@ def allocate(c: Comparison, run_id: str) -> Recommendation:
     top = max(eligible, key=lambda o: c.p_best[o])
     slots = base_slots(c, cur) | {"option": top, "probability": fmt_prob(c.p_best[top])}
     stmt = f"P(best = {top}) = {c.p_best[top]:.6g}; shares proportional to p_best in [{lo}, {hi}]"
-    g = make_guarantee("posterior_probability", slots, stmt, [slots["assumption"], *notices])
+    assumptions = [slots["assumption"], *unit_assumptions(c), *notices]
+    g = make_guarantee("posterior_probability", slots, stmt, assumptions)
     loss = sum(allocation[o] * float(c.expected_loss[o].amount) for o in eligible)
-    params: dict[str, Any] = {"allocation": allocation, "notices": notices}
+    params: dict[str, Any] = {"allocation": allocation, "notices": notices, **unit_params(c)}
     return build(
         action="allocate",
         c=c,
@@ -204,10 +215,19 @@ def allocate(c: Comparison, run_id: str) -> Recommendation:
         economics_id=c.economics_id,
         guarantee=g,
         expected_benefit=None,
-        expected_loss=money(round(loss, 2), cur),
+        expected_loss=_split_loss(c, loss, cur, econ is not None),
         reversibility="reversible",
         run_id=run_id,
     )
+
+
+def _split_loss(c: Comparison, loss: float, cur: str, has_economics: bool) -> Money | None:
+    """The split's share-weighted loss, to the cent. A count unit is priced first (U6); unit money
+    and the D30 no-economics branch keep the base's rounding (U5)."""
+    if not is_count(c) or not has_economics:
+        return money(round(loss, 2), cur)
+    priced = in_money(c, money(loss, cur))
+    return None if priced is None else money(round(float(priced.amount), 2), priced.currency)
 
 
 def prophet_allocation(*args: object, **kwargs: object) -> None:
