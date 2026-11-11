@@ -11,6 +11,7 @@ appear only when they carry a passing G5 result and pass G5 again against this b
 from __future__ import annotations
 
 import string
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from bayesian_marketing.core import (
     DiagnosticsReport,
     GateFailure,
     GateResult,
+    Money,
     Quantity,
     Recommendation,
     RenderedReport,
@@ -33,6 +35,7 @@ from bayesian_marketing.core import (
     utcnow,
 )
 from bayesian_marketing.decision.reallocation import EVIDENCE_BY_TARGET
+from bayesian_marketing.decision.units import fmt_unit_cost, priced_count
 from bayesian_marketing.reporting.template import REPORT_HTML
 
 # Report wording not yet in phrasing.yaml (manifest open question 1: proposed keys
@@ -191,12 +194,13 @@ def _guarantee_prose(
     slots: dict[str, Any] = {
         "horizon": _horizon(r),
         "assumption": "; ".join(r.guarantee.assumptions) or None,
-        "expected_loss": V.fmt_money(r.expected_loss) if r.expected_loss else None,
+        "expected_loss": _rec_money(r, r.expected_loss) if r.expected_loss else None,
     }
     alloc = r.params.get("allocation")
     if isinstance(alloc, dict) and alloc:
         slots["option"] = max(alloc, key=lambda k: alloc[k])
     slots.update(r.guarantee.slots)
+    slots.update(_cents_slots(r))
     if basis:  # D40: the fitted quantities' own route and evidence win over the guarantee's proxy
         slots["evidence_plain"] = _evidence_plain(basis, phr)
         routes = sorted({q.provenance.route for q in basis})
@@ -226,11 +230,32 @@ def _recommendation(r: Recommendation, bundle: ReportBundle, phr, tmpl) -> dict[
         "status": status,
         "status_label": _status_label(status, phr),
         # D51 (3), U2: a recommendation's amounts are money under every unit
-        "benefit": V.fmt_money(r.expected_benefit) if r.expected_benefit and traced else None,
-        "loss": V.fmt_money(r.expected_loss) if r.expected_loss and traced else None,
+        "benefit": _rec_money(r, r.expected_benefit) if r.expected_benefit and traced else None,
+        "loss": _rec_money(r, r.expected_loss) if r.expected_loss and traced else None,
         "reversibility": r.reversibility,
         "evidence": _evidence_plain(_rec_basis(r, bundle), phr) or phr["not_knowable"],
     }
+
+
+def _rec_money(r: Recommendation, m: Money) -> str:
+    """A recommendation amount (money, D51 U2). From a count comparison it shows cents
+    (unit_money_decimals, B24 F2); a contribution recommendation keeps V.fmt_money."""
+    return fmt_unit_cost(m) if priced_count(r.params) else V.fmt_money(m)
+
+
+def _cents_slots(r: Recommendation) -> dict[str, str]:
+    """B24 F2: a count recommendation's guarantee prose states its loss and the tolerance it is
+    held against in cents. The guarantee's own slots stay as issued; contribution: nothing."""
+    if not priced_count(r.params):
+        return {}
+    out: dict[str, str] = {}
+    if r.expected_loss is not None and "expected_loss" in r.guarantee.slots:
+        out["expected_loss"] = fmt_unit_cost(r.expected_loss)
+    f = r.decision_feasibility
+    if "tolerance" in r.guarantee.slots and r.expected_loss is not None and f.target is not None:
+        tol = Money(amount=Decimal(repr(float(f.target))), currency=r.expected_loss.currency)
+        out["tolerance"] = fmt_unit_cost(tol)
+    return out
 
 
 COUNT_UNITS = ("clicks", "orders", "leads")

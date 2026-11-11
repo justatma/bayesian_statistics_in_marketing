@@ -92,12 +92,23 @@ def _amount(m: Any, unit: str) -> str:
     return f"{float(m.amount):,.1f} {unit}"
 
 
-def _verdict(loss: Any, tolerance: Any) -> str:
-    """The tolerance verdict for one recommendation's expected loss, which is money (D51 U2),
-    with the registry's marginal band (D9)."""
-    from bayesian_marketing.core import registries
+def _rec_money(m: Any, counted: bool) -> str:
+    """A recommendation amount, which is money (D51 U2). From a count comparison it shows cents
+    (unit_money_decimals, B24 F2); a contribution recommendation keeps fmt_money."""
     from bayesian_marketing.decision.reallocation import fmt_money
+    from bayesian_marketing.decision.units import fmt_unit_cost
+
+    return fmt_unit_cost(m) if counted else fmt_money(m)
+
+
+def _verdict(loss: Any, tolerance: Any, counted: bool = False) -> str:
+    """The tolerance verdict for one recommendation's expected loss, which is money (D51 U2),
+    with the registry's marginal band (D9). ``counted``: the tolerance shows cents (B24 F2)."""
+    from bayesian_marketing.core import registries
     from bayesian_marketing.floors.estimability import DECISION_KEY
+
+    def fmt_money(m: Any) -> str:
+        return _rec_money(m, counted)
 
     if tolerance is None:
         return "no loss tolerance set"
@@ -243,6 +254,7 @@ class Narrator:
 
     def _recommendation(self, r: Any, info: dict[str, Any], c: Any, testing: bool = False) -> None:
         from bayesian_marketing.decision.reallocation import horizon_text
+        from bayesian_marketing.decision.units import priced_count
 
         action = ACTIONS.get(r.action, r.action)
         slots = r.guarantee.slots
@@ -267,10 +279,11 @@ class Narrator:
             h = horizon_text(r.horizon, r.expected_loss.currency)
             best = (r.params or {}).get("best", "")
             what = LOSS_FOR[r.action].format(best=best)
-            verdict = _verdict(r.expected_loss, info["tolerance"])
+            counted = priced_count(r.params)
+            verdict = _verdict(r.expected_loss, info["tolerance"], counted)
             _say(
                 "Expected loss",
-                f"{_amount(r.expected_loss, 'money')} over the next {h} {what}, {verdict}",
+                f"{_rec_money(r.expected_loss, counted)} over the next {h} {what}, {verdict}",
             )
 
 

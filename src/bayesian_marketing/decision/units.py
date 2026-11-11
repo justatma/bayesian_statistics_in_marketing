@@ -44,9 +44,16 @@ def no_cost_reason(c: Comparison) -> str:
 
 
 def fmt_unit_cost(m: Money) -> str:
-    """The cost of one unit at ``phrasing.rounding.unit_money_decimals`` (build log B23 (2))."""
+    """Money at ``phrasing.rounding.unit_money_decimals``: the cost of one unit (build log B23
+    (2)), and a count recommendation's amounts and tolerance (B24 F2), so cents never read as 0."""
     d = int(registries.load("phrasing")["rounding"]["unit_money_decimals"])
     return f"{float(m.amount):,.{d}f} {m.currency}"
+
+
+def priced_count(params: dict[str, Any] | None) -> bool:
+    """True for a recommendation made from a count comparison (its params carry the unit, C6).
+    Contribution recommendations carry no unit (U5), so their formatting is untouched."""
+    return (params or {}).get("unit") in SINGULAR
 
 
 def unit_params(c: Comparison) -> dict[str, Any]:

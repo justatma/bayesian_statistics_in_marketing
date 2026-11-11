@@ -363,6 +363,7 @@ def reallocate(
         )
 
     if is_count(c) and c.replacement_cost is None:  # D51 C6: nothing to price the counts with
+        notices.extend(survival_check(c, econ.survival_floor, list(c.options))[1])  # U7, B24 F1
         reason = no_cost_reason(c)
         g = none_guarantee(c, cur, reason, HOLD_REQUIREMENT.format(option=incumbent), notices)
         return build(

@@ -50,7 +50,7 @@ from bayesian_marketing.core import (
     registries,
     utcnow,
 )
-from bayesian_marketing.decision.units import fmt_unit_cost
+from bayesian_marketing.decision.units import fmt_unit_cost, priced_count
 
 # --- tokenizing ------------------------------------------------------------------------------
 
@@ -373,6 +373,9 @@ def _index(bundle: ReportBundle) -> _Bundle:
         for m in (r.expected_benefit, r.expected_loss):
             if m is not None:
                 ix.money_ok.add(_dec(V.fmt_amount(abs(m.amount))))
+                if priced_count(r.params):  # B24 F2: a count recommendation shows cents
+                    shown = fmt_unit_cost(m).split(" ")[0].lstrip("-")
+                    ix.money_ok.add(_dec(shown))
         ix.plain_ok.add(_dec(V.fmt_count(float(r.horizon.amount))))
         for slot in r.guarantee.slots.values():
             _accept_slot(ix, slot)
