@@ -124,6 +124,33 @@ class Comparison(Frozen):
     method: Literal["exact_integration", "joint_draws"]
     mc_standard_error: dict[str, float] | None = None  # joint_draws only (§8.1 C2)
     value_q05: dict[str, Money] | None = None  # D22: 5th pct of value at horizon (§8.2 C3)
+    # D51 (units spec v0.2 U3, U4, U9): the unit of the amounts above, and for a count unit the
+    # observed cost of one unit, pooled over the compared ads (a cost, never a sale value)
+    unit: Literal["money", "clicks", "orders", "leads"] = "money"
+    replacement_cost: Money | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unit_from_objective(cls, data: Any) -> Any:
+        """U3: an absent unit is derived from the objective; a contradicting unit is refused."""
+        if not isinstance(data, dict):
+            return data
+        obj = data.get("objective")
+        target = obj.get("target") if isinstance(obj, dict) else getattr(obj, "target", None)
+        derived = UNIT_BY_TARGET.get(str(target))
+        unit = data.get("unit")
+        if unit is None:
+            if derived is not None:
+                data = {**data, "unit": derived}
+            return data
+        leads_ok = unit == "leads" and derived == "orders"
+        if derived is not None and unit != derived and not leads_ok:
+            raise ValueError(f"unit {unit!r} contradicts objective target {target!r} (D51 U3)")
+        return data
+
+
+UNIT_BY_TARGET = {"contribution": "money", "clicks": "clicks", "orders": "orders"}
+"""D51 U3: the unit of a comparison under each objective target."""
 
 
 class DecisionProblem(Frozen):

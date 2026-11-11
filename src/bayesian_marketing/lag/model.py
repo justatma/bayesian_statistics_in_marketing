@@ -70,6 +70,13 @@ def _default_medians() -> dict[int, int]:
     return {int(k): int(v) for k, v in table.items()}
 
 
+def click_window_days(code: str) -> int | None:
+    """D51 U8: the click window of a window code, from its ``<n>d`` component followed by
+    ``click`` wherever it sits; None when there is none; ValueError for two or for 0 days.
+    Skeleton: L9 replaces the body and makes every caller use it."""
+    raise NotImplementedError("L9")
+
+
 def _click_window_days(window_code: str) -> int:
     m = _CLICK_WINDOW.match(window_code)
     if m is None or int(m.group(1)) <= 0:
