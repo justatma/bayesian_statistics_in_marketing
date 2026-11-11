@@ -264,3 +264,106 @@ Checked by the integrator: 33 failed, 10 passed before the build; every failure 
 |---|---|
 | `tests/acceptance/test_L6.py` | `9afaf3fa3cf38554b7a31bb812f3991f712a587044f4f5281b2482df174e143d` |
 | `tests/acceptance/test_L7.py` | `70273f0b4169bb09ea7eabfdf07abe5aa01be4d639ea7d618b21f3e84bb90126` |
+
+# Acceptance tests: units and window fix L8, L9 (D51)
+
+Spec `spec/Units_and_Window_Fix_v0.2.md`; §5 (U1 to U11) holds over §1 to §4. Written against the skeleton at f7b2d28.
+
+## Files written
+
+- tests/acceptance/test_L8.py (59 tests as collected; 36 functions; 43 fail before the build, 16 pass as guards)
+- tests/acceptance/test_L9.py (35 tests as collected; 13 functions; 25 fail before the build, 10 pass as guards)
+
+Run with `BAYES_PIECES=L8,L9`: 68 failed, 26 passed. `ruff check` and `ruff format --check` are clean on both.
+
+### test_L8.py
+| test | spec clause | before the build |
+|---|---|---|
+| test_L8_final_strings | U9 final strings, `SINGULAR` | passes, guard (skeleton carries them) |
+| test_L8_in_money_passes_money_through | C3 unit money | fails: NotImplementedError (`in_money`) |
+| test_L8_in_money_prices_a_count_at_the_replacement_cost [clicks, orders, leads] | C3 amount x cost | fails: NotImplementedError |
+| test_L8_in_money_is_in_the_replacement_costs_currency | C3 "in the replacement cost's currency" | fails: NotImplementedError |
+| test_L8_in_money_is_none_without_a_replacement_cost [x3] | C3 None | fails: NotImplementedError |
+| test_L8_absent_unit_is_derived_from_the_target [x3] | U3 derive, incl. an old snapshot's JSON with no `unit` key | passes, guard (skeleton validator) |
+| test_L8_contradicting_unit_is_refused [x7] | U3 refuse | passes, guard |
+| test_L8_leads_is_allowed_with_target_orders | U3, U9 | passes, guard |
+| test_L8_feasibility_estimable_on_the_priced_loss [x3] | C4: 0.5 x $2 = $1, `available` in money | fails: `available` is the raw count 0.5 |
+| test_L8_feasibility_marginal_on_the_priced_loss [x3] | C4: 100 x $2 = $200 in (150, 300] | fails: raw 100 reads estimable |
+| test_L8_feasibility_below_floor_on_the_priced_loss [x3] | C4: 0.5 x $1000 = $500 > 300 | fails: raw 0.5 reads estimable |
+| test_L8_feasibility_without_a_replacement_cost [x3] | C4, U9 `NO_REPLACEMENT_COST`, `available` 0.0 | fails: estimable, no reason |
+| test_L8_feasibility_no_tolerance_is_checked_first | U9 order: D16 first; `available` 0.0 with no money | fails: `available` is the raw count 3.0 |
+| test_L8_feasibility_no_tolerance_with_a_cost_reports_the_money_loss | C4 `available` in money under D16 | fails: `available` 3.0, not $6 |
+| test_L8_survival_floor_not_applied_to_a_count [x3] | C5, U7: no block, one `SURVIVAL_NOT_APPLIED` | fails: both options blocked |
+| test_L8_survival_notice_only_when_a_floor_is_set | U7 | passes, guard |
+| test_L8_survival_floor_still_applies_to_money | §8.2 C3 unchanged for money | passes, guard |
+| test_L8_reallocate_net_benefit_is_priced_benefit_minus_switching_cost | §4 "benefit x cost minus switching cost", C6 slots, params, `VALUED_AT`, U7 once | fails: not_knowable (every option breaches the floor) |
+| test_L8_hold_when_the_priced_benefit_does_not_cover_switching | C6 hold, loss in money | fails: reallocates on the raw 20 clicks |
+| test_L8_stop_test_loss_is_priced | U1 `loss=` and `loss_guarantee`, params, `VALUED_AT` | fails: expected loss 0.5, not $50 |
+| test_L8_stop_projection_uses_the_priced_loss | U1 `_projected_required` | fails: raw 2 is within tolerance, not_knowable |
+| test_L8_stop_without_a_replacement_cost_is_not_knowable | U1 None projection carries `NO_REPLACEMENT_COST` | fails: text absent |
+| test_L8_ctr_run_sets_unit_and_pooled_cost_over_compared_ads | C2, U4 clicks pooled over compared ads only (a third ad in the poll is left out), stored unrounded (1/3), set before `decision_feasibility` | fails: `replacement_cost` None |
+| test_L8_cvr_cost_skips_cells_with_no_known_count [purchase -> orders, lead -> leads] | U4 cells with no known count drop their spend; U9 unit leads | fails: `replacement_cost` None; lead run unit is orders |
+| test_L8_zero_clicks_gives_no_replacement_cost | §4 zero clicks, C4 reason, U6 None loss and the decision's reason | fails: decision estimable |
+| test_L8_zero_spend_gives_no_replacement_cost | U4 spend <= 0 | fails: decision estimable, no reason |
+| test_L8_lead_ctr_run_is_in_clicks | U9 leads only for target orders | fails: `replacement_cost` None |
+| test_L8_jovannah_shape_allocates | §4 Jovannah shape, U6 not `allocation.ALL_BLOCKED`, U7 notice once in params and assumptions, U6 share-weighted loss x cost, C6 params and `VALUED_AT` | fails: `replacement_cost` None (and today the run is not_knowable, ALL_BLOCKED) |
+| test_L8_no_survival_notice_without_a_floor | U7 | passes, guard |
+| test_L8_lead_cvr_stop_rec_loss_is_priced | U1 where the pipeline reaches it (lead cvr, immature cohorts), U9 | fails: unit orders, not leads |
+| test_L8_contribution_run_unchanged | U5 | passes, guard (see below) |
+| test_L8_socket_result_carries_unit_and_cost | U10, frozen floats kept | fails: KeyError `unit` |
+| test_L8_socket_result_money_unit | U10 | fails: KeyError `unit` |
+| test_L8_cli_demo_ctr_states_the_money_verdict | U2 `_amount`, `_verdict` runs the real test | fails: "no money tolerance applies to a loss in clicks" |
+| test_L8_render_recommendation_money_comparison_counts | U2 render: recommendations money, comparisons in unit | fails: the recommendation shows "5.0 clicks" |
+| test_L8_claims_accept_the_replacement_cost | U2 `claims/check._index` money value | fails: "$1 matches no bundle value" |
+
+### test_L9.py
+| test | spec clause | before the build |
+|---|---|---|
+| test_L9_click_window_days [15 codes] | C9, U8: Meta code 7, `7d_click_1d_view` 7, `28d_click` 28, `1d_click` 1, `1d_view` None, `per_conversion_action` None, `17d_click` 17, `7d_clicks` None, 14 and 90 parsed, LinkedIn 90 | fails: NotImplementedError |
+| test_L9_click_window_days_refuses [`0d_click`, two click components x2] | U8 ValueError | fails: NotImplementedError is not a ValueError |
+| test_L9_old_regex_is_gone | U8 `_CLICK_WINDOW` and the generator's `CLICK_WINDOW` deleted | fails: both exist |
+| test_L9_meta_code_takes_the_seven_day_default_curve | C9 through `_click_window_days` and `lag_model` | fails: ValueError "names no click window" |
+| test_L9_off_table_and_windowless_codes_still_raise [x5] | U8, A14: 14, 90, 0, `1d_view`, `7d_clicks` raise at `lag_model` | passes, guard |
+| test_L9_per_conversion_action_keeps_the_d38_path | D38.3 | passes, guard |
+| test_L9_lag_notices_on_the_meta_code | U8, A13: no false "names no click window" | fails: the notice is there |
+| test_L9_lag_notices_consults_the_shared_parser | U8 `lag_notices` uses the one parser | fails: the old regex is used, the replaced parser is never called |
+| test_L9_generator_reads_the_meta_code | U8 `simulate/write.py` | fails: ValueError "needs click_window_days" |
+| test_L9_generator_keeps_the_codes_it_read [x3] | U8 | passes, guard |
+| test_L9_generator_refuses_a_code_with_no_click_window | U8 whole components (`7d_clicks`) | fails: old regex reads 7 |
+| test_L9_lead_run_with_the_meta_code_adjusts_for_lag | §4 L9: no "conversion lag not adjusted", no "names no click window", 7-day default curve in the FunnelData | fails: "conversion lag not adjusted" |
+| test_L9_lead_run_with_the_usual_code_is_unchanged | regression | passes, guard |
+
+### How the tests drive the code
+
+Direct checks build comparisons through the `Comparison` constructor, so the U3 validator runs, and call `in_money`, `decision_feasibility`, `survival_check`, `reallocate` and `stop_or_continue`. The switching cost for the reallocate tests is set in the isolated registry copy (`iso.edit_yaml("channels", ...)`). Pipeline checks run `refresh` on `FakeStore` with real economics as in test_L5, wrapping `pipeline.execute` to keep each `RunContext`; a rerun with another metric, a subset of variants or a pinned clock goes to its own data dir. Each expected replacement cost is computed twice: by hand in the test, and from first principles over the `FunnelData` cells the run used (`pooled_cost`, U4 as written).
+
+U5 base expectation. The contribution test runs the purchase poll, then the captured request again with metric contribution, `pipeline.utcnow` pinned at 2026-11-07T18:30Z, a survival floor of $1 so the money floor path runs, into a fresh data dir. The four pins were taken on the unmodified checkout at f7b2d28 by a scratch pytest file outside the repo that imported this test's `Env` and printed: `run_id`; sha256 of `json.dumps(comparison.model_dump(mode="json", exclude={"unit", "replacement_cost"}), sort_keys=True)`; the same for the decision without `checked_at`; the recommendation ids (`rec_367ec186` allocate, `rec_56105a71` the not_knowable stop). The test also recomputes each id from the base `make_id("rec_", ...)` payload and checks no `unit`, `replacement_cost`, `VALUED_AT` or survival notice appear. The comparison digest holds floats from exact integration; it was taken on darwin, Python 3.13, the project venv.
+
+Both files were also run against a throwaway prototype of L8 and L9 in a scratch worktree outside the repo (never committed, removed): 94 of 94 pass on it. That run found and fixed three test errors: the registry rounds money to 0 decimals, so expected strings now come from `fmt_money`/`fmt_amount` rather than "x.00 USD"; and the parser spy built its lag model after replacing the parser.
+
+### Open points for the integrator
+
+1. Frozen conflict, known: `tests/unit/p11/test_p11_d38.py` line 143 asserts "USD tolerance" not in the ctr demo; `test_L8_cli_demo_ctr_states_the_money_verdict` asserts the money verdict. U2 and B23 revise line 143.
+2. `VALUED_AT` `{cost}` has no format in the spec. With `money_decimals: 0` a cost per click of $0.62 reads "1 USD per click". The tests accept any precision and check the shown number is the cost rounded to the decimals it is written with. The owner may want two decimals for a per-unit cost.
+3. `params["replacement_cost"]` has no stated form; the tests accept Money, `{"amount": ...}`, a string or a number. Same for `uncertainty["replacement_cost"]` in the socket reply.
+4. The allocate loss under a count unit may be rounded before or after pricing; the tests allow 0.006.
+5. Not pinned: `Comparison.replacement_cost` for unit money (U5 excludes it from the check); whether `NO_REPLACEMENT_COST` follows the D16 reason when both apply (only `reasons[0]` is pinned); which field of the stop not_knowable carries `NO_REPLACEMENT_COST` (the test searches the recommendation's JSON).
+6. Read as in scope: `unit`, `replacement_cost` and `VALUED_AT` on stop recommendations too. C6 names reallocate and hold, U1 names only the loss; the request for these tests said recommendations generally.
+7. Not tested: spend in another currency than the economics gives None (U4), because the pipeline refuses mixed currencies before compare; `lag_notices` on a two-click code not raising (A13 asked for it, U8 does not say it).
+8. `test_L9_lag_notices_consults_the_shared_parser` needs `lag_notices` to look up `lag.model.click_window_days` when called, not through an alias bound at import. `lag_model` has a parameter of the same name, so the builder will need a module-level route to the function; the test does not touch `lag_model`'s route.
+9. The generator tests call the private `simulate.write._windows`; there is no public seam short of writing a full scenario.
+10. U11 stands as the owner's note: on the Jovannah shape the priced loss is cents, the decision stays estimable, and the test does not assert the decision status.
+
+| File | sha256 (before any freeze) |
+|---|---|
+| `tests/acceptance/test_L8.py` | `56256fc345df2b02cdcf7c28ba6c13c9ab5e4d2d64828d3ffdb7e3620ea31f43` |
+| `tests/acceptance/test_L9.py` | `d0118bc9b619156102a8282bc6892e0d459f7ad07e69398ec73e62a45ff24631` |
+
+## L8 and L9 freeze (integrator, 2026-11-10)
+
+Checked by the integrator: 68 failed, 26 passed before the build; the failures are NotImplementedError in the stubs, counts tested against money, and Meta's window code refused; the 26 passes are the writer's marked guards. Rulings on the writer's points: build log B23.
+
+| File | sha256 |
+|---|---|
+| `tests/acceptance/test_L8.py` | `56256fc345df2b02cdcf7c28ba6c13c9ab5e4d2d64828d3ffdb7e3620ea31f43` |
+| `tests/acceptance/test_L9.py` | `d0118bc9b619156102a8282bc6892e0d459f7ad07e69398ec73e62a45ff24631` |
