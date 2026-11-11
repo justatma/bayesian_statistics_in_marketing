@@ -46,8 +46,7 @@ from bayesian_marketing.core import LagModel, OrderRow, Platform, inputs_hash, r
 
 DEFAULT_DATA_DIR = "data/generated"
 UTC_ZONE = "UTC"
-
-_CLICK_WINDOW = re.compile(r"^(\d+)d_click(?:_|$)")
+_DAYS = re.compile(r"[0-9]+d")
 
 NO_CLICK_WINDOW_CODES = frozenset({"per_conversion_action"})
 """Window codes that carry no click window in the row (Google Ads, F1 G10; D38.3)."""
@@ -73,15 +72,39 @@ def _default_medians() -> dict[int, int]:
 def click_window_days(code: str) -> int | None:
     """D51 U8: the click window of a window code, from its ``<n>d`` component followed by
     ``click`` wherever it sits; None when there is none; ValueError for two or for 0 days.
-    Skeleton: L9 replaces the body and makes every caller use it."""
-    raise NotImplementedError("L9")
+
+    Components are split on ``_``; a click window is a component matching ``^[0-9]+d$`` immediately
+    followed by the component ``click``. Whole components only: ``17d_click`` is 17, and
+    ``7d_clicks`` names no click window. The one parser for window codes (A13, A14).
+    """
+    parts = code.split("_")
+    found = [
+        int(parts[i][:-1])
+        for i in range(len(parts) - 1)
+        if _DAYS.fullmatch(parts[i]) and parts[i + 1] == "click"
+    ]
+    if len(found) > 1:
+        raise ValueError(f"window code {code!r} names {len(found)} click windows")
+    if not found:
+        return None
+    if found[0] <= 0:
+        raise ValueError(f"window code {code!r} names a {found[0]}-day click window")
+    return found[0]
 
 
 def _click_window_days(window_code: str) -> int:
-    m = _CLICK_WINDOW.match(window_code)
-    if m is None or int(m.group(1)) <= 0:
+    days = click_window_days(window_code)
+    if days is None:
         raise ValueError(f"window code {window_code!r} names no click window")
-    return int(m.group(1))
+    return days
+
+
+def _names_click_window(window_code: str) -> bool:
+    """For notices: a code the parser refuses (two click windows) counts as naming none (A13)."""
+    try:
+        return click_window_days(window_code) is not None
+    except ValueError:
+        return False
 
 
 def longest_default_window() -> int:
@@ -212,7 +235,7 @@ def lag_notices(lag: LagModel) -> list[str]:
     out: list[str] = []
     if lag.source == "registry_default":
         out.append(registries.resolve("phrasing/notices/lag_assumed@v1"))
-    if _CLICK_WINDOW.match(lag.attribution_window) is None:
+    if not _names_click_window(lag.attribution_window):
         code = lag.attribution_window
         if lag.source == "orders_history":
             out.append(NO_WINDOW_FROM_ORDERS.format(code=code, n=lag.n_lagged_conversions))
