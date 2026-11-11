@@ -24,11 +24,11 @@ from bayesian_marketing.core import (
     make_id,
     registries,
 )
+from bayesian_marketing.lag import model as lag_model
 from bayesian_marketing.simulate.draw import CENTS, SECONDS_PER_DAY, Conversion, World
 from bayesian_marketing.simulate.scenario import PlatformSpec, Scenario
 
 CURRENCY_SLOT = "{currency}"
-CLICK_WINDOW = re.compile(r"^(\d+)d_click")
 
 
 def channel(platform: str) -> dict[str, Any]:
@@ -81,10 +81,10 @@ def _windows(spec: PlatformSpec, platform: str, n_days: int) -> list[tuple[str, 
     def click_days(code: str, explicit: int | None) -> int:
         if explicit is not None:
             return explicit
-        m = CLICK_WINDOW.match(code)
-        if not m:
+        days = lag_model.click_window_days(code)
+        if days is None:
             raise ValueError(f"{platform}: window {code!r} needs click_window_days in the scenario")
-        return int(m.group(1))
+        return days
 
     code = spec.attribution_window or channel(platform)["default_attribution_window"]
     current = (code, click_days(code, spec.click_window_days))
