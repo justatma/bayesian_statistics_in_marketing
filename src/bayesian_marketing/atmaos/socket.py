@@ -252,6 +252,11 @@ def result_of(s: pipeline.RunSnapshot) -> dict:
         "compare_quantity": s.compare_quantity,
         "method": None if c is None else c.method,
         "mc_standard_error": None if c is None else c.mc_standard_error,
+        # D51 U10: the unit of expected_loss, and the cost a count unit is priced at
+        "unit": None if c is None else c.unit,
+        "replacement_cost": None
+        if c is None or c.replacement_cost is None
+        else _json(c.replacement_cost),
         "decision_feasibility": None if s.decision is None else _json(s.decision),
         "intervals": intervals,
         "interval_level": 0.9,

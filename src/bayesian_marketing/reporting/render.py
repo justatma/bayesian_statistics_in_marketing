@@ -191,9 +191,7 @@ def _guarantee_prose(
     slots: dict[str, Any] = {
         "horizon": _horizon(r),
         "assumption": "; ".join(r.guarantee.assumptions) or None,
-        "expected_loss": _fmt_value(r.expected_loss, _bundle_target(bundle))
-        if r.expected_loss
-        else None,
+        "expected_loss": V.fmt_money(r.expected_loss) if r.expected_loss else None,
     }
     alloc = r.params.get("allocation")
     if isinstance(alloc, dict) and alloc:
@@ -227,28 +225,21 @@ def _recommendation(r: Recommendation, bundle: ReportBundle, phr, tmpl) -> dict[
         "guarantee": _guarantee_prose(r, bundle, phr, tmpl),
         "status": status,
         "status_label": _status_label(status, phr),
-        "benefit": _fmt_value(r.expected_benefit, _bundle_target(bundle))
-        if r.expected_benefit and traced
-        else None,
-        "loss": _fmt_value(r.expected_loss, _bundle_target(bundle))
-        if r.expected_loss and traced
-        else None,
+        # D51 (3), U2: a recommendation's amounts are money under every unit
+        "benefit": V.fmt_money(r.expected_benefit) if r.expected_benefit and traced else None,
+        "loss": V.fmt_money(r.expected_loss) if r.expected_loss and traced else None,
         "reversibility": r.reversibility,
         "evidence": _evidence_plain(_rec_basis(r, bundle), phr) or phr["not_knowable"],
     }
 
 
-COUNT_TARGETS = ("clicks", "orders")  # D40: Comparison types counts as Money (P3 open question 2)
+COUNT_UNITS = ("clicks", "orders", "leads")
+"""D51 U2: a comparison's amounts display in ``c.unit``; compare types counts as Money (§8.1)."""
 
 
-def _bundle_target(bundle: ReportBundle) -> str | None:
-    targets = {c.objective.target for c in bundle.comparisons}
-    return targets.pop() if len(targets) == 1 else None
-
-
-def _fmt_value(m: Any, target: str | None) -> str:
-    if target in COUNT_TARGETS:
-        return f"{float(m.amount):,.1f} {target}"
+def _fmt_value(m: Any, unit: str) -> str:
+    if unit in COUNT_UNITS:
+        return f"{float(m.amount):,.1f} {unit}"
     return V.fmt_money(m)
 
 
@@ -263,12 +254,8 @@ def _comparisons(bundle: ReportBundle, phr: dict[str, Any]) -> list[dict[str, An
             {
                 "option": o,
                 "p_best": V.fmt_percent(c.p_best.get(o, 0.0)),
-                "value": _fmt_value(c.expected_value[o], c.objective.target)
-                if o in c.expected_value
-                else "",
-                "loss": _fmt_value(c.expected_loss[o], c.objective.target)
-                if o in c.expected_loss
-                else "",
+                "value": _fmt_value(c.expected_value[o], c.unit) if o in c.expected_value else "",
+                "loss": _fmt_value(c.expected_loss[o], c.unit) if o in c.expected_loss else "",
             }
             for o in c.options
         ]

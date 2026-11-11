@@ -140,7 +140,7 @@ def test_demo_ctr_runs_and_a_bad_pair_stops_cleanly(
     text = capsys.readouterr().out
     assert code == 0, text
     assert "1,000 impressions" in text and "Traceback" not in text
-    assert "USD tolerance" not in text  # a loss in clicks is not held against money
+    assert "USD tolerance" in text  # D51, B23: the priced loss is held against money
 
 
 # ------------------------------------------------------------------ D33 (D38.6)

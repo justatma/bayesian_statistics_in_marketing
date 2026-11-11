@@ -50,6 +50,7 @@ from bayesian_marketing.core import (
     registries,
     utcnow,
 )
+from bayesian_marketing.decision.units import fmt_unit_cost
 
 # --- tokenizing ------------------------------------------------------------------------------
 
@@ -362,6 +363,10 @@ def _index(bundle: ReportBundle) -> _Bundle:
         ix.probs += [*c.p_best.items(), *c.p_exceeds_break_even.items()]
         for m in (*c.expected_value.values(), *c.expected_loss.values()):
             ix.money_ok.add(_dec(V.fmt_amount(abs(m.amount))))
+        if c.replacement_cost is not None:  # D51 U2: the cost a count is priced at
+            cost = c.replacement_cost
+            ix.money_ok.add(_dec(V.fmt_amount(abs(cost.amount))))
+            ix.money_ok.add(_dec(fmt_unit_cost(cost).split(" ")[0]))  # as VALUED_AT shows it
         ix.plain_ok.add(_dec(V.fmt_count(float(c.objective.horizon.amount))))
         ads |= set(c.options)
     for r in bundle.recommendations:
