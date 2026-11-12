@@ -35,8 +35,8 @@ REGIME_NOTICE_KEYS: tuple[str, ...] = (
     "platform_modeled",  # D28, §5.2 C6
 )
 """phrasing.yaml notices for the §6.1 regime mismatches "lag-adjusted approximation" and "funnel
-link not estimated". Each downgrades the status one level. "Attribution change in window" has no
-phrasing key yet (open question in spec/manifests/P4.md)."""
+link not estimated". Together they lower the status one level at most (D52). "Attribution
+change in window" has no phrasing key yet (open question in spec/manifests/P4.md)."""
 
 NO_TOLERANCE_REASON = "no loss tolerance set"  # D16, verbatim
 
