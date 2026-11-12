@@ -6,7 +6,6 @@ import hashlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from decimal import Decimal
 from pathlib import Path, PurePosixPath
 
 from bayesian_marketing import pipeline
@@ -18,10 +17,10 @@ from bayesian_marketing.core import (
     Horizon,
     PerformanceRow,
     PlatformPull,
-    registries,
 )
 from bayesian_marketing.core.records import ClientConfig
 from bayesian_marketing.data_contract.connectors import meta
+from bayesian_marketing.live import horizon as live_horizon
 from bayesian_marketing.live.contracts import Clock, LiveRow, PollRecord, RefreshRecord, Store
 
 ONE_AD = "one ad, nothing to compare"
@@ -87,13 +86,15 @@ def _outcome(
             return "skipped", NO_ECONOMICS_PATH, None
         manifest = _manifest(config, poll_rec, rows, ads)
         pull = _pull(poll_rec, rows)
+        horizon, basis = _budget_horizon(manifest, config_root, poll_rec, rows, store)
         request = CompareRequest(
             metric=METRIC,
             variants=ads,
             priors=dict(config.priors),
             window=poll_rec.window,
-            horizon=_horizon(),
+            horizon=horizon,
             conversion_kind=_conversion_kind(config),
+            horizon_basis=basis,
         )
         with data_dir_env(data_dir):
             ctx = pipeline.execute(manifest, request, manifest_dir=config_root, pulls=[pull])
@@ -129,10 +130,31 @@ def data_dir_env(path: Path) -> Iterator[None]:
 
 
 def _horizon() -> Horizon:
-    """The default CTR horizon, built as ``cli.demo_horizon("ctr")`` builds it."""
-    h = registries.resolve("decision_defaults/horizon_default@v1")
+    """The default CTR horizon, built as ``cli.demo_horizon("ctr")`` builds it; the fallback's
+    horizon (fix v0.2 C6) is this one."""
+    return live_horizon.default_horizon(pipeline.horizon_unit(METRIC))
+
+
+def _budget_horizon(
+    manifest: DatasetManifest,
+    config_root: Path,
+    poll_rec: PollRecord,
+    rows: list[LiveRow],
+    store: Store,
+) -> tuple[Horizon, str]:
+    """D53 (1), fix v0.2 C7: the horizon from the test budget left and its basis. Economics that
+    cannot be read give the fallback (S8); the pipeline then skips or fails as before."""
     unit = pipeline.horizon_unit(METRIC)
-    return Horizon(unit=unit, amount=Decimal(str(h["amount"])))  # type: ignore[arg-type]
+    try:
+        econ = pipeline._economics(manifest, config_root)
+    except Exception:  # S8: any exception from the load
+        econ = None
+    if econ is None:
+        return live_horizon.fallback(unit, live_horizon.WHY_NO_ECONOMICS)
+    spent, since = live_horizon.spend_to_date(
+        store, poll_rec.client_id, PLATFORM, poll_rec.started_at
+    )
+    return live_horizon.budget_horizon(econ.test_budget, spent, since, rows, unit)
 
 
 def _manifest(
