@@ -892,11 +892,12 @@ def _immature_cohorts(data: FunnelData, ads: list[str]) -> int:
 
 
 def _request_key(request: CompareRequest) -> Any:
-    """The request as it is hashed for seed and run id. A purchase request hashes as it did
-    before ``conversion_kind`` existed, so purchase runs are unchanged (D46)."""
+    """The request as it is hashed for seed and run id. ``horizon_basis`` only explains the
+    horizon, which is itself in the key, so it is never hashed (S6). A purchase request also
+    hashes as it did before ``conversion_kind`` existed, so purchase runs are unchanged (D46)."""
     if request.conversion_kind == "purchase":
-        return request.model_dump(mode="json", exclude={"conversion_kind"})
-    return request
+        return request.model_dump(mode="json", exclude={"conversion_kind", "horizon_basis"})
+    return request.model_dump(mode="json", exclude={"horizon_basis"})
 
 
 def _seed(manifest: DatasetManifest, request: CompareRequest) -> int:
@@ -1012,8 +1013,11 @@ def execute(
     )
     gates.append(g8)
 
-    # lag
-    lag, lag_notes = fit_lag(platform, perf, orders, manifest.utm_map, as_of, end)
+    # lag: a lead is counted when it happens, so it takes no curve (D53 (2), C2)
+    if lead:
+        lag, lag_notes = None, [LEAD_NO_LAG]
+    else:
+        lag, lag_notes = fit_lag(platform, perf, orders, manifest.utm_map, as_of, end)
     data = assemble_funnel_data(
         pulls,
         lag,
@@ -1063,7 +1067,7 @@ def execute(
     if lead:  # D46 (2): a lead is never priced
         names = [n for n in names if n not in VALUED]
     by_variant, missing = derive_all(
-        state, variants, names, (start, end), platform, econ, [n for n in lag_notes]
+        state, variants, names, (start, end), platform, econ, [] if lead else list(lag_notes)
     )
     if lead:
         for v in variants:
@@ -1166,6 +1170,8 @@ def execute(
     changes = [c for p in perf for c in p.measurement_changes]
     if changes:
         notices.append(WINDOW_CHANGED.format(changes="; ".join(changes)))
+    if request.horizon_basis is not None:
+        notices.append(request.horizon_basis)  # C3, S10: last, once
     configuration = {
         "engine_version": __version__,
         "registry_versions": registries.versions(),

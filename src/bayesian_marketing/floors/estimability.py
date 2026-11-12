@@ -130,7 +130,7 @@ def quantity_feasibility(q: Quantity, target: PrecisionTarget) -> Feasibility:
 
     regime = _regime_notices()
     mismatches = [regime[n] for n in q.notices if n in regime]
-    status = _downgrade(width_status, len(mismatches))
+    status = _downgrade(width_status, min(1, len(mismatches)))  # D52: one level in total
     reasons.extend(mismatches)
 
     # available and required are both event counts (D22 item 5). Feasibility.available is a
