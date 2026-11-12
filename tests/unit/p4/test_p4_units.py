@@ -40,7 +40,9 @@ def test_regime_notice_downgrades_one_level() -> None:
     f1 = quantity_feasibility(one, _target())
     assert f1.status == "marginal" and any(lag in r for r in f1.reasons)
     two = B.quantity("ctr", estimate=est, notices=[lag, few])
-    assert quantity_feasibility(two, _target()).status == "below_floor"
+    f2 = quantity_feasibility(two, _target())
+    assert f2.status == "marginal"  # D52: mismatches cost one level in total (B25, S5)
+    assert any(lag in r for r in f2.reasons) and any(few in r for r in f2.reasons)  # S5
 
 
 def test_required_projection_uses_n_events() -> None:

@@ -367,3 +367,61 @@ Checked by the integrator: 68 failed, 26 passed before the build; the failures a
 |---|---|
 | `tests/acceptance/test_L8.py` | `56256fc345df2b02cdcf7c28ba6c13c9ab5e4d2d64828d3ffdb7e3620ea31f43` |
 | `tests/acceptance/test_L9.py` | `d0118bc9b619156102a8282bc6892e0d459f7ad07e69398ec73e62a45ff24631` |
+
+## L10 and L11 (test writer, 2026-11-11)
+
+Spec: `spec/Mismatch_Lead_Lag_Horizon_Fix_v0.2.md`, §6 (S1 to S13) holding over §1 to §5; D52, D53; build log B25. Written on eng-bayes-v2 at the skeleton commit 048dd65. Nothing under `src/` was edited. Not committed.
+
+| File | Status | sha256 |
+|---|---|---|
+| `tests/acceptance/test_L10.py` | new | `84dfabcc9dc5036cd07c18f7a46acc7681cedf0a59c487b09c1e222cdb1326cd` |
+| `tests/acceptance/test_L11.py` | new | `215b019bf4b7a2073e03551dd27f3765a42f99181a5d9eb660a0484714c8870b` |
+| `tests/acceptance/test_L8.py` | revised (S3) | `8d13046964186f458eaffa99a14ee4621a4107590fb204b2ae6b05e1f0590162` |
+| `tests/acceptance/test_L9.py` | revised (S7) | `825138a3677a5d6cb8abce928ddac74f43e3dea9435e41e433a2dcfaa5a45c79` |
+| `tests/unit/p4/test_p4_units.py` | revised (S5) | `86db0af74aa30daf74bd52c7289b374b07b63a3cc9d210b7f9d171c6594bf702` |
+| `tests/unit/l5/test_l5_lead.py` | revised (S6) | `09aedbd883d4d70a4d151f9035b8f61557e6d7cbec1bc7eb80db77258dd06e89` |
+
+### Before the build (skeleton 048dd65, `BAYES_PIECES=L10,L11`)
+
+| File | Failed | Passed | Why the failures fail |
+|---|---|---|---|
+| `test_L10.py` | 26 | 17 | 14 stacking (`_downgrade` by the mismatch count); 4 lag applied to leads (mature fractions below 1, cvr median 0.36 against raw 0.25, `lag_approx` on quantities); 6 `horizon_basis` in the request key (the skeleton dumps it as null); 2 basis not appended to the notices. The 17 passes are marked guards. |
+| `test_L11.py` | 33 | 1 | 27 NotImplementedError from the `live/horizon.py` stubs; 6 refresh checks see `horizon_basis` None on the request. The pass is the final-strings guard. |
+| `test_L8.py` | 1 | 58 | `test_L8_contribution_run_unchanged`, broken by the skeleton, not by this revision (point 4). The revised S3 test passes before the build. |
+| `test_L9.py` | 2 | 35 | The two lead tests now assert no lag (S7). The two moved purchase checks pass, marked guards. |
+| `test_p4_units.py` | 1 | 15 | The revised S5 test: two mismatches still give below_floor. |
+| `test_l5_lead.py` | 1 | 6 | The revised S6 test: the skeleton's purchase key still holds `horizon_basis`. |
+
+Full `tests/unit` and `tests/acceptance` without `BAYES_PIECES`, before these changes: 930 passed, 1 failed (`test_L8_contribution_run_unchanged`, point 4), 10 skipped. After: 928 passed, 5 failed, 87 skipped. The 77 new L10 and L11 tests are skipped by the piece gate, and test_L9 has 2 more tests (each lead test now has a purchase twin). The 5 failures are that same L8 test plus the four revised tests that expect L10: `test_l5_lead.py::test_purchase_request_hashes_as_before_the_field`, `test_p4_units.py::test_regime_notice_downgrades_one_level`, and the two `test_L9` lead tests. Nothing else changed.
+
+### Judgment calls and open points
+
+1. Conflict inside S9, for the integrator before builders start. S9 names `claims.vocab.fmt_money`, which prints `money_decimals` (0 in the registry): "1,256 USD", "1,500 USD", "30 USD". S9's worked sentence prints two decimals: "1,256.24 USD", "1,500.00 USD", "29.74 USD", which is what `decision.units.fmt_unit_cost` (`unit_money_decimals: 2`) prints. Both cannot hold. The tests pin the sentence as written. The one helper `money()` in test_L11 is the place to change if the ruling goes the other way (and `S9_SENTENCE`).
+2. Not in B25, breaks after L10: `tests/acceptance/test_L6.py::test_L6_purchase_run_ids_and_seed_equal_the_base`. Line 392 builds the expected key with `exclude={"conversion_kind"}` only; under S6 the key also drops `horizon_basis`, so the seed differs (3847609391 against 2728225508 with the S6 key rule patched in memory). Left untouched, as the brief said no more than B25. It needs a build log row and `"horizon_basis"` added to that exclude.
+3. C6 gives no format for `{amount}` in the fallback sentence. Pinned `fmt_count` ("the default 1,000 impressions"), the formatter S9 names for the same placeholder in C5.
+4. The skeleton already moves every run id: `CompareRequest.model_dump` carries `horizon_basis: null` into both the purchase and the lead key, so `test_L8_contribution_run_unchanged` fails on 048dd65 and L10 restores it. test_L10 pins the pre-field keys: `inputs_hash(_request_key(req))` and the run id formula for a fixed purchase and lead request, taken by running `pipeline._request_key` from `git archive 21f1b21 src` extracted to the scratchpad (sys.path first, module path printed to confirm).
+5. The S3 revision makes the cohort immature by setting each ad's last-day mature fraction to 0.5 (under `min_maturity` 0.90) in a copy of the run's FunnelData, and passes the run's own decision and the loaded economics. Checked in memory with `fit_lag` stubbed to no curve: the decision stays estimable and the U1 loss assertions hold.
+6. "A cvr whose median sits near the raw rate" is pinned as within 10% of the raw 70 / 280 = 0.25 per ad. With the lag curve it is 0.36; with no curve it is inside the band.
+7. S4 is read as: no lag notice of any kind on a quantity (`lag_approx`, `lag_assumed`, `LEAD_NO_LAG`), and `lag_assumed` absent from a lead run's notices, `LEAD_NO_LAG` present once. An in-memory stub that passes `[LEAD_NO_LAG]` to `derive_all` (review A4) fails these, as intended.
+8. S10 order. Fit notices are identified by the `too_few_ads` notice, which this two-ad fixture's fit emits. `WINDOW_CHANGED` is produced by putting a measurement change on the captured pull, since refresh never sets one. The check is that a run with the basis has exactly the notices of the same run without it, plus the basis last.
+9. `spend_to_date` with mixed currencies is pinned only when the winning rows mix. Whether a superseded older row in another currency matters is left unpinned; S13 does not say.
+10. Pinned from S12: `as_of` inclusive, interrupted polls excluded with error polls, ties on `started_at` to the greater `poll_id` in both insertion orders, other clients ignored.
+11. The C5 amount is pinned as an integer Decimal printing "42238" (B10). A test also shows rounding the rate to the cent first gives 42,240, which is wrong under S9.
+12. S8 is pinned through refresh with a missing file (skipped, today's G9 reason exactly) and a file that is not JSON (failed, reason starting "ValidationError: ", as today). Both requests carry the fallback with `WHY_NO_ECONOMICS`.
+13. Left unpinned: a test budget in a currency other than the account's, through refresh; `spent` set with `since` None (S13 says both or neither); the rounding of `{per_1000}` beyond what the sentences show.
+14. The L11 refresh checks need L10 merged, because the basis reaches the run's notices through `pipeline.execute`. A builder running `BAYES_PIECES=L11` without L10 sees the `notices[-1]` assertions fail.
+15. Satisfiability. An in-memory prototype (a pytest plugin in the scratchpad, never in the repo) of `spend_to_date`, `budget_horizon`, the one-level cap and the S6 key rule passed all 64 pure-function tests in test_L10, test_L11 and the two unit files, plus the run id checks and `test_L8_contribution_run_unchanged`. A full scratch copy to prototype the pipeline and refresh wiring was refused by the permission system, so the refresh and notice-order tests are checked only by reading.
+
+## L10 and L11 freeze (integrator, 2026-11-11)
+
+Rulings on the writer's points: build log B26. test_L6 line 392 revised by the integrator (B26 (2)).
+
+| File | sha256 |
+|---|---|
+| `tests/acceptance/test_L10.py` | `84dfabcc9dc5036cd07c18f7a46acc7681cedf0a59c487b09c1e222cdb1326cd` |
+| `tests/acceptance/test_L11.py` | `215b019bf4b7a2073e03551dd27f3765a42f99181a5d9eb660a0484714c8870b` |
+| `tests/acceptance/test_L8.py` | `8d13046964186f458eaffa99a14ee4621a4107590fb204b2ae6b05e1f0590162` |
+| `tests/acceptance/test_L9.py` | `825138a3677a5d6cb8abce928ddac74f43e3dea9435e41e433a2dcfaa5a45c79` |
+| `tests/acceptance/test_L6.py` | `c5f08295a7be7d06a7f0da6f570f7123e4b7194f04d31f00b3a52128cc5a451b` |
+| `tests/unit/p4/test_p4_units.py` | `86db0af74aa30daf74bd52c7289b374b07b63a3cc9d210b7f9d171c6594bf702` |
+| `tests/unit/l5/test_l5_lead.py` | `09aedbd883d4d70a4d151f9035b8f61557e6d7cbec1bc7eb80db77258dd06e89` |

@@ -6,8 +6,12 @@ Spec: ``spec/Units_and_Window_Fix_v0.2.md`` §3 C9 and §5 U8 (U8 holds where th
 ``lag_model``, ``lag_notices``, ``simulate/write.py``) are checked by what they return for Meta's
 real code ``1d_view_7d_click_1d_ev``. ``lag_notices`` is also checked with the shared parser
 replaced, which shows it consults that function rather than a regex of its own. The pipeline check
-runs ``refresh`` against ``FakeStore`` with real economics, as in test_L5, on a lead run whose rows
-carry Meta's code.
+runs ``refresh`` against ``FakeStore`` with real economics, as in test_L5, on rows that carry Meta's
+code.
+
+Revised by the test writer under ``spec/Mismatch_Lead_Lag_Horizon_Fix_v0.2.md`` S7 (build log
+B25): a lead takes no lag curve (D53 (2)), so the 7-day curve and the Meta code checks run on
+purchase runs with the same rows, and the lead runs assert no lag (C2, S4).
 """
 
 from __future__ import annotations
@@ -229,7 +233,7 @@ def seed_poll(store: FakeStore, code: str) -> PollRecord:
     return rec
 
 
-def lead_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str) -> Any:
+def pipeline_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str, *, lead: bool) -> Any:
     config_root = tmp_path / "configs"
     data_dir = tmp_path / "engine_data"
     data_dir.mkdir()
@@ -249,7 +253,7 @@ def lead_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str) -> Any:
         currency="USD",
         accounts={"meta": "act_555"},
         economics_path=f"economics/{ECON_ID}.json",
-        conversion_event={"meta": LEAD_EVENT},
+        conversion_event={"meta": LEAD_EVENT} if lead else {},
     )
     store = FakeStore()
     clock = FixedClock(dt.datetime(2026, 11, 7, 18, 0, 0, 654321, tzinfo=UTC))
@@ -263,10 +267,11 @@ def lead_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str) -> Any:
     return contexts[0]
 
 
-def test_L9_lead_run_with_the_meta_code_adjusts_for_lag(
+def test_L9_purchase_run_with_the_meta_code_adjusts_for_lag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ctx = lead_run(tmp_path, monkeypatch, META_CODE)
+    """Guard (S7): L9's lag check on a purchase run with the same rows; passes before the build."""
+    ctx = pipeline_run(tmp_path, monkeypatch, META_CODE, lead=False)
     snap = ctx.snapshot
     assert not any(NOT_ADJUSTED in n for n in snap.notices), snap.notices  # §4 L9
     assert not any(NAMES_NO_WINDOW in n for n in snap.notices), snap.notices  # U8, A13
@@ -278,11 +283,32 @@ def test_L9_lead_run_with_the_meta_code_adjusts_for_lag(
     assert min(want) < 1.0  # the curve was applied, not the "no lag" fallback of 1.0
 
 
-def test_L9_lead_run_with_the_usual_code_is_unchanged(
+def assert_no_lag(ctx: Any) -> None:
+    snap = ctx.snapshot
+    assert not any(NOT_ADJUSTED in n for n in snap.notices), snap.notices
+    assert not any(NAMES_NO_WINDOW in n for n in snap.notices), snap.notices
+    assert registries.resolve("phrasing/notices/lag_assumed@v1") not in snap.notices  # C2
+    assert snap.notices.count(pipeline.LEAD_NO_LAG) == 1  # C2, S4: a run notice
+    assert snap.configuration["lag"] is None  # C2
+    assert all(f == 1.0 for row in ctx.data.mature_fraction for f in row)  # C2
+    approx = registries.resolve("phrasing/notices/lag_approx@v1")
+    for q in snap.quantities:
+        assert approx not in q.notices and pipeline.LEAD_NO_LAG not in q.notices  # S4
+
+
+def test_L9_lead_run_with_the_meta_code_takes_no_lag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Guard: ``7d_click_1d_view`` runs as before; passes before the build."""
-    ctx = lead_run(tmp_path, monkeypatch, "7d_click_1d_view")
+    """S7: the lead run with Meta's code asserts no lag (C2, S4)."""
+    assert_no_lag(pipeline_run(tmp_path, monkeypatch, META_CODE, lead=True))
+
+
+def test_L9_purchase_run_with_the_usual_code_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard: ``7d_click_1d_view`` runs as before on a purchase run (S7); passes before the
+    build."""
+    ctx = pipeline_run(tmp_path, monkeypatch, "7d_click_1d_view", lead=False)
     snap = ctx.snapshot
     assert not any(NOT_ADJUSTED in n for n in snap.notices)
     assert not any(NAMES_NO_WINDOW in n for n in snap.notices)
@@ -290,3 +316,10 @@ def test_L9_lead_run_with_the_usual_code_is_unchanged(
         "source": "registry_default",
         "window": "7d_click_1d_view",
     }
+
+
+def test_L9_lead_run_with_the_usual_code_takes_no_lag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S7: the lead run with the usual code asserts no lag (C2, S4)."""
+    assert_no_lag(pipeline_run(tmp_path, monkeypatch, "7d_click_1d_view", lead=True))

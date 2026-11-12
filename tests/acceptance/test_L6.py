@@ -389,7 +389,7 @@ def test_L6_purchase_run_ids_and_seed_equal_the_base(env: Env) -> None:
     assert a.priors["cvr"] == purchase_id("cvr")  # R15
     assert a.priors["ctr"] == purchase_id("ctr")
     manifest = call["manifest"]
-    key = req_kind.model_dump(mode="json", exclude={"conversion_kind"})
+    key = req_kind.model_dump(mode="json", exclude={"conversion_kind", "horizon_basis"})  # S6, B26
     want_seed = int(C.inputs_hash({"manifest": manifest.manifest_id, "request": key})[:8], 16)
     assert a.configuration["seed"] == want_seed  # C3: the base's seed formula
     want_run = C.make_id(

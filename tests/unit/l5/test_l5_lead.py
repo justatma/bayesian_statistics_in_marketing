@@ -55,6 +55,7 @@ def test_purchase_request_hashes_as_before_the_field() -> None:
     req = _request()
     old = req.model_dump(mode="json")
     del old["conversion_kind"]
+    del old["horizon_basis"]  # S6: never in the key (B25)
     assert canonical_json(pipeline._request_key(req)) == canonical_json(old)
     lead = _request(conversion_kind="lead")
     assert canonical_json(pipeline._request_key(lead)) != canonical_json(old)

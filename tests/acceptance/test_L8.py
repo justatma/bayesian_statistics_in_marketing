@@ -699,7 +699,14 @@ def test_L8_no_survival_notice_without_a_floor(env: Env) -> None:
 
 
 def test_L8_lead_cvr_stop_rec_loss_is_priced(env: Env) -> None:
-    """U1 where the pipeline reaches it: a lead cvr run with immature cohorts."""
+    """U1 on a lead cvr comparison with immature cohorts.
+
+    Revised by the test writer under fix spec v0.2 S3 (build log B25): a lead run takes no lag
+    curve (D53), so no lead cohort is immature and the pipeline no longer reaches the stop path.
+    ``stop_or_continue`` is called directly with the run's leads comparison and decision and the
+    run's FunnelData with its last day made immature. The U1 assertions are unchanged. Passes
+    before the build too.
+    """
     write_economics(env.config_root)
     env.run(config(conversion_event={"meta": LEAD_EVENT}), list(TWO), simple_rows(TWO))
     ctx = env.rerun(metric="cvr")
@@ -707,8 +714,13 @@ def test_L8_lead_cvr_stop_rec_loss_is_priced(env: Env) -> None:
     assert c is not None and c.unit == "leads"
     cost = pooled_cost(ctx.data, c.options, "leads")
     assert cost is not None and abs(cost - 210 / (7 * 10 + 7 * 12)) < 1e-12
-    stops = [r for r in ctx.snapshot.recommendations if r.action in ("stop_test", "continue_test")]
-    assert len(stops) == 1, [r.action for r in ctx.snapshot.recommendations]
+    decision = ctx.snapshot.decision
+    assert decision is not None
+    immature = [[*row[:-1], 0.5] for row in ctx.data.mature_fraction]  # under min_maturity 0.90
+    data = ctx.data.model_copy(update={"mature_fraction": immature})
+    econ = C.load_economics(ECON_ID, env.config_root)
+    stops = [stop_or_continue(c, decision, data, econ, ctx.snapshot.run_id)]  # S3
+    assert stops[0].action in ("stop_test", "continue_test"), stops[0].action
     best = min(float(m.amount) for m in c.expected_loss.values())
     loss = stops[0].expected_loss
     assert loss is not None and loss.currency == "USD"
