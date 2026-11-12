@@ -131,6 +131,7 @@ NOT_ESTIMABLE_REASON = "{quantity} not estimable for {options}: {why}"
 DATA_REQUIREMENT = "{quantity} has to become estimable for every compared ad"
 PLANNED_OBJECTIVE = "objective {metric!r} needs its value model ({model}); not built yet (D33)"
 LEAD_NOT_VALUED = "a lead is counted, never valued (D33)"
+LEAD_NO_LAG = "no lag curve: a lead is counted when it happens (D53)"  # L10 C2, run notice only
 INHERITED_REASON = "inherits the worst status of its inputs ({inputs}) (D10)"
 NON_FINITE_REASON = (
     "the posterior has no finite spread for this quantity with the data seen (too few events)"

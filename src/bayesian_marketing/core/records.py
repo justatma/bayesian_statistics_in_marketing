@@ -153,6 +153,8 @@ class CompareRequest(Frozen):
     segments: dict[str, Any] = Field(default_factory=dict)
     # D46: a lead run counts leads and never values them (D33). Default keeps purchase runs.
     conversion_kind: Literal["purchase", "lead"] = "purchase"
+    # D53: how the horizon was chosen, in words. Never part of the request key (spec v0.2 S6).
+    horizon_basis: str | None = None
 
 
 class RunResult(Frozen):
