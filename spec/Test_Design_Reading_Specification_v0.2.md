@@ -64,7 +64,7 @@ So for a design, `estimable` means powered to detect `smallest_effect`, the chan
 
 11. The remedy is null when the word is `estimable`, under rule 6, and under rule 8. Otherwise it is non-null for both `marginal` and `below_floor`, and it always aims at `estimable`. The first of these that applies, in this order:
     - (a) `coarser_comparison`. For m from k − 1 down to 2, the kept set is the control plus the m − 1 non-control arms with the largest shares, ties broken by arm key in code-point order, with shares renormalised over the kept arms and alpha re-split as alpha / (m − 1). The first m whose kept set is `estimable` by rules 1 to 4 with `units_available` gives `remedy_amount` = m, the number of arms to keep, the control included. Which arms to keep is not said; that is the CIE's call.
-    - (b) `longer_run`. This applies when `units_per_period` is above 0 and `periods_needed` is no more than `test_design/max_periods` (12, an engineering choice, in the new registry `registries/test_design.yaml`). `remedy_amount` = `periods_needed`, the total periods the test runs, not the extra ones.
+    - (b) `longer_run`. This applies when `units_per_period` is above 0 and `periods_needed` is no more than `MAX_PERIODS` (12, an engineering choice, J6.S4). `remedy_amount` = `periods_needed`, the total periods the test runs, not the extra ones.
     - (c) `larger_group`. Otherwise `remedy_amount` = `units_needed`, the total across all arms, not the shortfall.
    
    The order is deliberate. A design that two arms would answer now is told so before it is told to wait. That matches request case 5 and the interim rule. The CIE may still choose to run longer instead.
@@ -201,3 +201,10 @@ J6.S2 (the Arkwright Engineer and the Principal Architect, 27 Nov).
    Check: its values equal the registries', and `rule_ref` equals a reading's.
 
 J6.S3 (the Arkwright Engineer, 27 Nov). How cost is rounded, exactly. `cost_of_test` = `(Decimal(repr(unit_cost)) * exposed_units).quantize(Decimal("0.01"), ROUND_HALF_UP)`, where `exposed_units` is the integer from rule 13, sent as a JSON number (`float` of that Decimal). `repr` gives the shortest decimal that reads back as the unit cost's double, which is the figure the sender meant. The product with an integer is then exact, so a half-cent edge rounds as written. Rounding the float product instead differs at such edges: 0.155 × 3 is 0.46499999999999997 as floats, and that would give 0.46 where the rule gives 0.47. Check: (i) gains 0.155 × 3 = 0.47 and 0.015 × 3 = 0.05.
+
+J6.S4 (the integrator, 27 Nov). `max_periods` lives in code, not in a new registry file. `core.registries.versions()` lists every YAML file under `registries/`, and every run's config hash includes that list. A new `registries/test_design.yaml` would therefore change every run's config hash once, for a design-reading policy that no run uses, so the value goes in code instead.
+- It is `bayesian_marketing.test_design.reading.MAX_PERIODS = 12`, an engineering choice.
+- The reading's `rule_ref` becomes `["bounds/estimability/posterior_width@v1", "engine:test_design.reading.MAX_PERIODS@<engine_version>"]`.
+- `read_test_design_rule()` still returns `max_periods`, so AtmaOS's equality test reads it from there as before.
+- Rule 11 (b) and check (m) read `MAX_PERIODS`. Check (m)'s second half patches the constant instead of a fixture registry.
+- Check: adding J6 leaves `registries.versions()` unchanged, and so leaves every run's config hash unchanged.
