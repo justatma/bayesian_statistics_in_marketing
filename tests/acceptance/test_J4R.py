@@ -415,12 +415,9 @@ def test_J4R_cmp_leader_under_half_carries_the_caveat(env: J4REnv, run: str, for
     env.set_p_best(run, {IMG3_ID: 0.45, IMG2_ID: 0.30})
     res = env.render(f"{cmp_run(run, form)}.")
     assert res["ok"] is True, why(res)
-    lead = (
-        f"{IMG3}, which leads on clicks with a 45% chance of being best"
-        if form == "full"
-        else f"{IMG3} leads on clicks, with a 45% chance of being best"
-    )
-    assert res["text"].startswith(lead), res["text"]
+    # Amended by the integrator (B31): under S27 (5) a leader under 0.5 names no ad.
+    assert "neither ad leads yet on clicks" in res["text"].lower(), res["text"]
+    assert IMG3 not in res["text"], res["text"]
     assert ROUGH in res["text"]
 
 
