@@ -419,9 +419,21 @@ def approve_prior(prior_id: str, approver: str) -> dict:
 
 def conversion_kind_of(s: pipeline.RunSnapshot) -> str:
     """J5: the snapshot's own conversion kind, or, for a snapshot saved before J5, the client
-    config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a synthetic
-    or unconfigured client is "purchase"."""
-    raise NotImplementedError
+    config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a
+    synthetic or unconfigured client is "purchase"."""
+    if s.conversion_kind is not None:
+        return s.conversion_kind
+    if s.synthetic:
+        return "purchase"
+    import yaml
+
+    from bayesian_marketing.live import config as live_config
+    from bayesian_marketing.live import refresh as live_refresh
+
+    try:  # any failure to read or parse the config is "purchase", never a raise (review F1, F2)
+        return live_refresh._conversion_kind(live_config.load_client(s.client_id))
+    except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
+        return "purchase"
 
 
 def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) -> ReportBundle:
@@ -438,6 +450,7 @@ def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) 
         diagnostics=s.diagnostics,
         knowability=s.knowability,
         narrative_blocks=blocks,
+        conversion_kind=conversion_kind_of(s),  # type: ignore[arg-type]
     )
 
 

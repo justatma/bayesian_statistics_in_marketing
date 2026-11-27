@@ -183,9 +183,12 @@ class Narrator:
             f"{len(ppc)} stages",
         )
 
-    def _not_knowable(self, info: dict[str, Any]) -> None:
-        """The compared and requested quantities that are not knowable, by ad (D38.4)."""
-        from bayesian_marketing.claims.vocab import METRIC_LABELS
+    def _not_knowable(self, info: dict[str, Any], conversion_kind: str = "purchase") -> None:
+        """The compared and requested quantities that are not knowable, by ad (D38.4), named
+        from the run's conversion kind's labels (J5)."""
+        from bayesian_marketing.claims.vocab import labels
+
+        metric_labels, _ = labels(conversion_kind)
 
         names = list(dict.fromkeys([info["compare_quantity"], info["metric_quantity"]]))
         by_name: dict[str, list[str]] = {}
@@ -205,7 +208,7 @@ class Narrator:
             for q in info["quantities"]
             if q.feasibility.status == "below_floor" and (q.scope.ids["ad"], q.name) not in shown
         )
-        parts = [f"{METRIC_LABELS[n]} for {', '.join(ads)}" for n, ads in by_name.items()]
+        parts = [f"{metric_labels[n]} for {', '.join(ads)}" for n, ads in by_name.items()]
         if others > 0:
             more = "1 more quantity" if others == 1 else f"{others:,} more quantities"
             parts.append(f"{more} in the report")
@@ -228,7 +231,7 @@ class Narrator:
             if negative:
                 line += f"; {len(negative)} of {_count(len(values), 'option')} negative"
             _say("Expected value", f"over the next {h}: {line}")
-        self._not_knowable(info)
+        self._not_knowable(info, info.get("conversion_kind", "purchase"))
         if c is not None and self._compared_not_knowable(info):
             # D39: a decision rests on expected loss (D9), not on each value's precision.
             _say(

@@ -30,13 +30,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Literal, Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
 from bayesian_marketing import __version__
-from bayesian_marketing.claims.vocab import METRIC_LABELS
+from bayesian_marketing.claims.vocab import labels
 from bayesian_marketing.core import (
     ClientEconomics,
     CompareRequest,
@@ -845,10 +845,15 @@ def not_knowable(
 
 
 def not_estimable_reason(
-    quantity: str, variants: dict[str, str], missing: dict[str, dict[str, str]]
+    quantity: str,
+    variants: dict[str, str],
+    missing: dict[str, dict[str, str]],
+    conversion_kind: str = "purchase",
 ) -> str:
     """One clause per distinct reason, naming the ads (the report's option names) it holds for,
-    so a reason shared by every ad is said once (D38.1)."""
+    so a reason shared by every ad is said once (D38.1). The quantity is named from the run's
+    conversion kind's labels (J5)."""
+    metric_labels, _ = labels(conversion_kind)
     by_reason: dict[str, list[str]] = {}
     for v, ad in variants.items():
         why = missing.get(v, {}).get(quantity)
@@ -856,7 +861,7 @@ def not_estimable_reason(
             by_reason.setdefault(why, []).append(ad)
     return "; ".join(
         NOT_ESTIMABLE_REASON.format(
-            quantity=METRIC_LABELS.get(quantity, quantity), options=", ".join(ads), why=why
+            quantity=metric_labels.get(quantity, quantity), options=", ".join(ads), why=why
         )
         for why, ads in by_reason.items()
     )
@@ -1120,7 +1125,7 @@ def execute(
         recs.append(
             not_knowable(
                 run_id,
-                not_estimable_reason(cq, variants, missing),
+                not_estimable_reason(cq, variants, missing, request.conversion_kind),
                 objective,
                 rec_scope,
                 econ.economics_id,  # type: ignore[union-attr]
@@ -1166,6 +1171,7 @@ def execute(
         metric_quantity=mq,
         tolerance=None if econ is None else econ.loss_tolerance,
         immature_cohorts=immature,
+        conversion_kind=request.conversion_kind,
     )
 
     notices = [*fit_notices, *lag_notes]
@@ -1220,6 +1226,7 @@ def execute(
     snap = RunSnapshot(
         run_id=run_id,
         client_id=manifest.client_id,
+        conversion_kind=request.conversion_kind,
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,
