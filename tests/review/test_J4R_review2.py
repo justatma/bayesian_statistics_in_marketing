@@ -459,12 +459,11 @@ def test_J4R_review2_a_release_whose_catalog_names_another_client_than_its_id_re
     assert refused(res), repr(res["text"])
 
 
-def test_J4R_review2_menu_and_render_differ_when_another_ads_name_collides_in_the_store(
+def test_J4R_review2_menu_and_render_agree_when_another_ads_name_collides_in_the_store(
     env: J4REnv, run: str
 ) -> None:
-    """The menu reads the store (an ad of the run is unnamed), where the name of a second ad
-    equals IMG3's, and drops both names; a render of the same slot alone does not read the
-    store and keeps IMG3's. Same slot, two renderings.
+    """The store gives a second ad IMG3's name. The review found the menu and a render of the
+    same slot alone disagreed on IMG3's name (S26 (1)); they must agree.
 
     Amended for J4R.2 (check (b)): the store's name makes both ads candidates under rule 2, so
     each is given an ad set, and IMG3 renders "IMG3_TXT1 (Set A)" on the menu and alone."""
@@ -479,12 +478,11 @@ def test_J4R_review2_menu_and_render_differ_when_another_ads_name_collides_in_th
     assert res["text"] == item["forms"]["start"], (res["text"], item["forms"]["start"])
 
 
-def test_J4R_review2_same_slot_renders_differently_with_another_slot_beside_it(
+def test_J4R_review2_same_slot_renders_the_same_with_another_slot_beside_it(
     env: J4REnv, run: str
 ) -> None:
-    """The ctr slot of IMG3 renders "IMG3_TXT1's ..." alone and "Ad 1202...'s ..." when a name
-    slot of the other ad is in the text, because the names layers depend on what else is
-    needed.
+    """The review found IMG3's ctr slot rendered "IMG3_TXT1's ..." alone and "Ad 1202...'s ..."
+    beside a name slot of the other ad (S26 (1)); it must render the same either way.
 
     Amended for J4R.2 (check (b)): the store's name makes both ads candidates under rule 2, so
     each is given an ad set, and IMG3 renders "IMG3_TXT1 (Set A)" alone and beside the other."""
