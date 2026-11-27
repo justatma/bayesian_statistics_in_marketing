@@ -5,19 +5,23 @@ a lead client config (``conversion_event = {"meta": LEAD_EVENT}``) written into 
 ``BAYES_CONFIG_DIR``. The only difference from test_L5's ``seed_poll`` is that the poll's start,
 window and ad ids are parameters, so a second, newer run can be made for the staleness cases (p).
 
-Entity names: a ``RunSnapshot`` carries no entity names (its fields are fixed, ``extra="forbid"``,
-and ``refresh`` passes ``LiveRow.entity_names`` only into the pull, not the snapshot). So the run's
-ads are named here by id: the ad the spec calls "IMG3_TXT1" has the ad id ``IMG3_TXT1``, which a
-sentence names by id. The ad "IMG2_TXT1 <en dash> Updated." has a numeric id, and its name exists
-only in a notebook ``meta_object`` source, so check (j) exercises name matching through a notebook
-source.
+Entity names (S16): ad ids are numeric. ``RunSnapshot.entity_names`` (id to name) is written into
+each saved snapshot by ``lead_run_at``, since at the skeleton ``refresh`` does not fill it yet; the
+fixture poll's rows carry no names, so a built ``refresh`` writes ``{}`` and the edit sets them.
+A case that needs a snapshot without names sets ``{}`` again (``set_names``). The name
+"IMG2_TXT1 <en dash> Updated." is also in a notebook ``meta_object`` source, for check (j).
+``J4Env.figures`` passes a fake ``load_names`` (``env.store_names``, ``{}`` unless a case sets
+it), so no case reads the live store.
 
 A quantity's summary or status is set for a case by editing the saved snapshot file, the way
 test_J5's ``with_cpa_q50`` does.
 
 Releases are written with ``notebook.release.write_release`` into ``tmp_path / "notebook"``, with
 ``BAYES_NOTEBOOK_DIR`` pointed there. ``created_at`` is pinned per release (``write_release``
-reads ``datetime.now``), so an older and a newer release differ in it as well as in day and parent.
+reads ``datetime.now``). Newest is decided by S21 only: a run's ``started_at`` in the run record
+(``pipeline.utcnow`` is pinned per run) and a release's (day, n) and parent link. The staleness
+fixtures make every other signal point the other way: the newer run is written first and its file
+gets the older mtime, and the newer release gets the earlier ``created_at``.
 """
 
 from __future__ import annotations
@@ -33,7 +37,9 @@ from unittest import mock
 import pytest
 
 from bayesian_marketing import core as C
+from bayesian_marketing import pipeline
 from bayesian_marketing.atmaos import socket as sock
+from bayesian_marketing.decision import run_record
 from bayesian_marketing.live.contracts import LiveRow, PollRecord
 from bayesian_marketing.live.refresh import refresh
 from bayesian_marketing.notebook import release as nb_release
@@ -45,13 +51,19 @@ UTC = dt.UTC
 CLIENT = "lead_client"  # test_L5's client, marked lead by its config
 OTHER = "other_client"
 
-IMG3 = "IMG3_TXT1"  # ad id in the run (the run holds no names)
+IMG3 = "IMG3_TXT1"  # the ad's name
+IMG3_ID = "120253899504590526"
 IMG2_ID = "120253899504590527"
-IMG2_NAME = "IMG2_TXT1 \u2013 Updated."  # with an en dash; only in a notebook source
+IMG2_NAME = "IMG2_TXT1 \u2013 Updated."  # with an en dash
+IMG4 = "IMG4_TXT1"  # a name known only to an injected load_names (S20)
+IMG4_ID = "120253899504590528"
+RUN_NAMES = {IMG3_ID: IMG3, IMG2_ID: IMG2_NAME}
 
 START_OLD = dt.datetime(2026, 11, 7, 17, 30, tzinfo=UTC)
 WINDOW_OLD = (dt.date(2026, 11, 1), dt.date(2026, 11, 7))
 START_NEW = dt.datetime(2026, 11, 8, 17, 30, tzinfo=UTC)
+STARTED_OLD = dt.datetime(2026, 11, 7, 18, 0, tzinfo=UTC)  # the run record's started_at
+STARTED_NEW = dt.datetime(2026, 11, 8, 18, 0, tzinfo=UTC)
 WINDOW_NEW = (dt.date(2026, 11, 2), dt.date(2026, 11, 8))
 
 ENGINE_VERSION = "bayesian-marketing 0.2.0.dev0"
@@ -122,7 +134,7 @@ def seed_poll(
     return rec
 
 
-ADS = {IMG3: (1000, 40), IMG2_ID: (1000, 60)}
+ADS = {IMG3_ID: (1000, 40), IMG2_ID: (1000, 60)}
 
 
 # ------------------------------------------------------------------ notebook
@@ -148,6 +160,11 @@ def sources() -> dict[str, dict[str, Any]]:
             {"object_type": "campaign", "object_id": "c1", "read_at": "2026-11-20T15:00:00+00:00"},
             {"id": "c1", "lifetime_budget": "150000"},
         ),
+        "ad3": _source(
+            "meta_object",
+            {"object_type": "ad", "object_id": IMG3_ID, "read_at": "2026-11-20T15:00:00+00:00"},
+            {"id": IMG3_ID, "name": IMG3, "status": "ACTIVE"},
+        ),
         "ad2": _source(
             "meta_object",
             {"object_type": "ad", "object_id": IMG2_ID, "read_at": "2026-11-20T15:00:00+00:00"},
@@ -156,13 +173,23 @@ def sources() -> dict[str, dict[str, Any]]:
         "run": _source(
             "engine_run",
             {"run_id": "run_0000f1x7"},
-            {"run_id": "run_0000f1x7", "comparison": {"p_best": {IMG3: 0.621}}},
+            {"run_id": "run_0000f1x7", "comparison": {"p_best": {IMG3_ID: 0.621}}},
         ),
     }
 
 
-def _entry(eid: str, kind: str, statement: str, method: str, src: str, **kw: Any) -> dict:
+def _entry(
+    eid: str,
+    kind: str,
+    statement: str,
+    method: str,
+    src: str,
+    context: list[str] | None = None,
+    **kw: Any,
+) -> dict:
     srcs = sources()
+    basis = [{"source_id": srcs[src]["source_id"], "role": "primary"}]
+    basis += [{"source_id": srcs[c]["source_id"], "role": "context"} for c in context or []]
     e = {
         "entry_id": eid,
         "kind": kind,
@@ -170,7 +197,7 @@ def _entry(eid: str, kind: str, statement: str, method: str, src: str, **kw: Any
         "method": method,
         "date": "2026-11-20",
         "as_of": "2026-11-20T15:00:00+00:00",
-        "basis": [{"source_id": srcs[src]["source_id"], "role": "primary"}],
+        "basis": basis,
     }
     e.update(kw)
     return e
@@ -210,6 +237,7 @@ def entries(limit: float = 1500) -> list[dict[str, Any]]:
             f"{IMG3} has a 0.621 chance of being the best ad.",
             "estimated",
             "run",
+            context=["ad3"],
             quantities=[
                 {
                     "name": "p_best",
@@ -272,12 +300,22 @@ class J4Env(J5Env):
         monkeypatch.setenv("BAYES_NOTEBOOK_DIR", str(self.nb_root))
         self.write_config(config(**LEAD))
         self._pulls = 10
+        self.store_names: dict[str, str] = {}
+        self.names_calls: list[str] = []
 
     # runs
 
-    def lead_run_at(self, start: dt.datetime, window: tuple[dt.date, dt.date]) -> str:
+    def lead_run_at(
+        self,
+        start: dt.datetime,
+        window: tuple[dt.date, dt.date],
+        started_at: dt.datetime | None = None,
+    ) -> str:
+        """A lead run; ``started_at`` pins the run record's start (``pipeline.utcnow``)."""
         self._pulls += 1
         self.clock = FixedClock(start + dt.timedelta(minutes=30))
+        at = started_at or start + dt.timedelta(minutes=30)
+        self.mp.setattr(pipeline, "utcnow", lambda: at)
         rec = refresh(
             config(**LEAD),
             seed_poll(self.store, start, window, ADS, self._pulls),
@@ -287,16 +325,31 @@ class J4Env(J5Env):
             config_root=self.config_root,
         )
         assert rec.status == "ran", rec.reason
+        self.set_names(rec.run_id, RUN_NAMES)
         return rec.run_id
 
+    def set_names(self, run_id: str, names: dict[str, str]) -> None:
+        """Set the snapshot's ``entity_names`` (S16), keeping the file's mtime."""
+        mtime = self.snapshot_file(run_id).stat().st_mtime
+        self.rewrite(run_id, lambda d: d.update(entity_names=dict(names)))
+        os.utime(self.snapshot_file(run_id), (mtime, mtime))
+        assert self.snapshot(run_id).entity_names == names
+
+    def started_at(self, run_id: str) -> dt.datetime:
+        (rec,) = self.in_data(lambda: run_record.read("RunRecord", run_id=run_id))
+        return rec.started_at
+
     def old_and_new_runs(self) -> tuple[str, str]:
-        old = self.lead_run_at(START_OLD, WINDOW_OLD)
-        new = self.lead_run_at(START_NEW, WINDOW_NEW)
+        """Two runs; only the run record's started_at says which is newer (S21). The newer is
+        written first, and its snapshot file is given the older mtime."""
+        new = self.lead_run_at(START_NEW, WINDOW_NEW, started_at=STARTED_NEW)
+        old = self.lead_run_at(START_OLD, WINDOW_OLD, started_at=STARTED_OLD)
         assert old != new
-        t_old = START_OLD.timestamp() + 1800
-        os.utime(self.snapshot_file(old), (t_old, t_old))
-        t_new = START_NEW.timestamp() + 1800
-        os.utime(self.snapshot_file(new), (t_new, t_new))
+        assert self.started_at(old) < self.started_at(new)
+        t_late = STARTED_NEW.timestamp() + 86400
+        t_early = STARTED_OLD.timestamp() - 86400
+        os.utime(self.snapshot_file(old), (t_late, t_late))
+        os.utime(self.snapshot_file(new), (t_early, t_early))
         return old, new
 
     def quantity(self, run_id: str, ad: str, name: str) -> dict[str, Any]:
@@ -331,10 +384,10 @@ class J4Env(J5Env):
         self.snapshot(run_id)  # the edited file still loads
         return qid[0]
 
-    def ctr_44(self, run_id: str, status: str = "marginal") -> str:
-        """IMG3_TXT1's ctr: median and mean 4.4%, q05 4.0%, q95 4.7%."""
+    def ctr_44(self, run_id: str, status: str = "marginal", ad: str = IMG3_ID) -> str:
+        """IMG3_TXT1's ctr (or ``ad``'s): median and mean 4.4%, q05 4.0%, q95 4.7%."""
         return self.set_quantity(
-            run_id, IMG3, "ctr", status=status, q50=0.044, mean=0.044, q05=0.040, q95=0.047
+            run_id, ad, "ctr", status=status, q50=0.044, mean=0.044, q05=0.040, q95=0.047
         )
 
     # notebook
@@ -357,8 +410,15 @@ class J4Env(J5Env):
 
     # the call
 
+    def load_names(self, client_id: str) -> dict[str, str]:
+        """The fake live store's names (S16's third source); never the real store."""
+        self.names_calls.append(client_id)
+        return dict(self.store_names)
+
     def figures(self, text: str, refs: list[dict[str, Any]], **kw: Any) -> dict[str, Any]:
-        """``socket.check_client_figures`` with ``BAYES_DATA_DIR`` at the runs' data dir."""
+        """``socket.check_client_figures`` with ``BAYES_DATA_DIR`` at the runs' data dir and the
+        fake ``load_names`` unless a case passes its own."""
+        kw.setdefault("load_names", self.load_names)
         return self.in_data(lambda: sock.check_client_figures(text, refs, **kw))
 
 
