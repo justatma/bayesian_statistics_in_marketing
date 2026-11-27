@@ -24,6 +24,7 @@ import jinja2
 from scipy import stats
 
 from bayesian_marketing import pipeline
+from bayesian_marketing.atmaos.socket import conversion_kind_of
 from bayesian_marketing.core import registries
 from bayesian_marketing.core.records import ClientConfig
 from bayesian_marketing.floors.estimability import event_floor
@@ -360,13 +361,14 @@ def _engine(
     except (KeyError, ValueError, OSError) as e:
         engine["sentence"] = live["engine_failed"].format(reason=str(e).strip("'\""))
         return engine
+    kind = conversion_kind_of(snap)  # J5: a lead run's view says sign-ups, cost per in cents
     for q in snap.quantities:
         if q.feasibility.status == "below_floor":
-            nk = not_knowable_lines(q, phrasing)
+            nk = not_knowable_lines(q, phrasing, kind)
             if nk["text"]:
                 engine["not_knowable"].append(nk)
             continue
-        lines = finding_lines(q, phrasing)
+        lines = finding_lines(q, phrasing, kind)
         engine["findings"].append(
             {
                 "cells": [str(lines[k]) for k in _FINDING_KEYS],

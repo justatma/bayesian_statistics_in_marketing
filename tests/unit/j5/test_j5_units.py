@@ -77,10 +77,16 @@ def test_display_value_purchase_is_fmt_value() -> None:
     assert display_value(q, 3.35, "purchase") == V.fmt_value(q, 3.35)
 
 
-def test_display_value_lead_cpa_in_cents_other_money_unchanged() -> None:
+def test_display_value_lead_cost_per_in_cents_cpm_unchanged() -> None:
     assert display_value(_cpa("ad_a", 3.35), 3.35, "lead") == "3.35"
-    cpc = _cpa("ad_a", 1234.5, "cpc")
-    assert display_value(cpc, 1234.5, "lead") == V.fmt_value(cpc, 1234.5)
+    assert display_value(_cpa("ad_a", 1234.5, "cpc"), 1234.5, "lead") == "1,234.50"
+    cpm = _cpa("ad_a", 1234.5, "cpm")
+    assert display_value(cpm, 1234.5, "lead") == V.fmt_value(cpm, 1234.5) == "1,234"
+
+
+def test_display_value_purchase_cpc_unchanged() -> None:
+    cpc = _cpa("ad_a", 0.42, "cpc")
+    assert display_value(cpc, 0.42) == V.fmt_value(cpc, 0.42) == "0"
 
 
 @pytest.mark.parametrize("word", V.PURCHASE_WORDS)

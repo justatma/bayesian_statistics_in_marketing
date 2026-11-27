@@ -419,8 +419,8 @@ def approve_prior(prior_id: str, approver: str) -> dict:
 
 def conversion_kind_of(s: pipeline.RunSnapshot) -> str:
     """J5: the snapshot's own conversion kind, or, for a snapshot saved before J5, the client
-    config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a synthetic
-    or unconfigured client is "purchase"."""
+    config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a
+    synthetic or unconfigured client is "purchase"."""
     if s.conversion_kind is not None:
         return s.conversion_kind
     if s.synthetic:

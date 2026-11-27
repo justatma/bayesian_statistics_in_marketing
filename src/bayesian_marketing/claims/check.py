@@ -199,8 +199,9 @@ _POLARITY = {
 }
 _SIZE_WORDS = frozenset({"higher", "lower", "more", "fewer", "less", "highest", "lowest"})
 _COST_METRICS = frozenset({"cpa", "cpc", "cpm"})
-# J5 (S11, S15): on a lead run the cost per sign-up displays and is checked in cents.
-_LEAD_UNIT_MONEY = frozenset({"cpa"})
+# J5 (S11, S15): on a lead run cost-per money (cost per sign-up, cost per click) displays and is
+# checked in cents; cpm keeps money_decimals.
+_LEAD_UNIT_MONEY = frozenset({"cpa", "cpc"})
 _PURCHASE_WORD_RE = re.compile(
     r"(?<![\w-])(?:" + "|".join(re.escape(w) for w in V.PURCHASE_WORDS) + r")(?![\w-])",
     re.IGNORECASE,
@@ -209,7 +210,7 @@ _PURCHASE_WORD_RE = re.compile(
 
 def display_value(q: Quantity, x: float, conversion_kind: str = "purchase") -> str:
     """One summary value of a quantity as a run of this conversion kind shows it. A purchase run
-    is ``V.fmt_value`` unchanged; a lead run shows its cost per sign-up at
+    is ``V.fmt_value`` unchanged; a lead run shows its cost per sign-up and cost per click at
     ``unit_money_decimals`` (J5, S15)."""
     if conversion_kind == "lead" and q.name in _LEAD_UNIT_MONEY:
         d = int(V.phrasing()["rounding"]["unit_money_decimals"])
