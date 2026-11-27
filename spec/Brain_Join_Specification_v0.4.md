@@ -292,3 +292,30 @@ A6. `QUANTITY_WORDS` stays as it is. "Only one sign-up" is a figure and must fai
 ### Settled after the J4R test writer (26 Nov)
 
 S24. (1) "order of magnitude" joins `QUANTITY_PHRASES`, because C7 requires review 2's case to fail. Adding to the list only refuses more, so A6's freeze holds. (2) The category check (Nd, No, Nl, Sc) runs on the raw text, before NFKC, so Ⅻ and ⅰ fail. Word matching runs after NFKC, casefold and Cf stripping. (3) ISO 4217 codes match case-sensitively in upper case only, so "all", "try", "top" and "cup" stay ordinary words. (4) On a lead account, "leads" next to an ad's name is linted, even where it's a count. A false fail costs a rewording, and the lint is not the guarantee. (5) The word forms the test writer listed (`tests/acceptance/j4r_fixtures.WORD_FORMS`) are the floor for `quantity_word_forms()`. (6) `SlotOut.token` is the slot exactly as written, braces included. `ref` is the ref part, without form or claim id. The cmp caveat is joined as ", still a rough estimate".
+
+### Settled after the J4R blind review (26 Nov, review/J4R 1e39675: 22 findings, 12 blocking)
+
+S25. The numeral rule changes from a deny list alone to an allow list of characters plus the deny list. Both only refuse more.
+(1) Characters. After the slots are removed, every character must be one of: ASCII letters; Latin letters U+00C0 to U+017F, except × (U+00D7) and ÷ (U+00F7); the space and the line feed; and the punctuation `. , ; : ! ? ' " ( ) - / &` plus `’ ‘ “ ” – — …`. Any other character fails, with "a character outside the allowed set", naming its code point. This covers invisible characters of every category, homoglyphs from other scripts, small capitals, emoji, private-use characters, controls and lone surrogates. It replaces the Nd/No/Nl/Sc check, which it contains. The A3 normalisation still runs on the word check. Cf characters are now refused as characters, never stripped.
+(2) Roman numerals. A token of two or more letters that is a valid Roman numeral in either case (`^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$`) fails. "I" alone is a word.
+(3) Words joined into one. A token that splits wholly into two or more number words ("fiftyfive", "twentyone", "onehundred") fails.
+(4) The word list gains:
+- nought, naught, nil, once, dual, duo, trio, quartet, pair, pairs;
+- the ordinals first to twentieth, plus hundredth, thousandth and millionth (with "second" in);
+- trillion, quadrillion, zillion, jillion, gazillion, bazillion, umpteen, lakh, crore;
+- the numbers zero to twenty, hundred and thousand in Spanish, French, German, Italian and Portuguese, less the common English words they collide with ("due", "seize", "elf", "un", "une", "una", "sept", "dos" stays in).
+The list stays strict. The refusal log is what shows later which words cost retries.
+(5) Rendering rounds half up (decimal ROUND_HALF_UP) everywhere: percent, money and counts. A probability that would show as 100% renders "more than 99%", and one that would show as 0% renders "less than 1%".
+(6) Notebook units are a closed set:
+- an ISO 4217 code, rendered with its sign where one exists and otherwise the code after the value;
+- "count";
+- "ratio" or "probability", which are fractions;
+- "percent", where the value is already in percent;
+- "days".
+Any other unit fails the slot ("unit not renderable").
+(7) A notebook quantity's subject is never read from the statement. The notebook format goes to bayes-notebook-1.1.0, which adds an optional `subject` to a quantity: `{"level": "account" | "campaign" | "ad_set" | "ad", "id": ...}`. Without it, the subject is the account. The renderer names the campaign, ad set or ad the subject gives.
+(8) A notebook ref's conversion kind comes from the client's newest run when one exists, otherwise from the config. When neither can be read, it is "lead" if any of the client's runs says lead. If nothing can be read at all, the slot fails rather than guess the label.
+(9) A display name that holds a brace, a percent sign, a currency sign, a spelled quantity word or a character outside the allowed set fails its slot, wherever it is rendered ("a name that states a figure"). Digits in a name, such as "IMG3_TXT1", are allowed only inside rendered slots, never in free text.
+(10) A run's client is read from the whole file, not its head. A file whose head and body name different clients fails as unreadable.
+(11) The lint's sentence splitter doesn't split after "e.g.", "i.e.", "etc." or "vs.".
+(12) A zero-width or other Cf character is refused under (1), so it can't join two words into one.
