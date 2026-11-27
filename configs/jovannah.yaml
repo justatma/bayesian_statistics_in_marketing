@@ -13,3 +13,7 @@ conversion_event:
   meta: offsite_conversion.fb_pixel_lead
 conversion_event_confirmed:
   meta: true
+# J4R.2 (8): the main ad set's Meta name holds "$" and fails the display-name rule, so the ads
+# it shares names with are named by this alias. Keys are quoted: an unquoted id loads as a number.
+display_names:
+  "120253899504550526": "the main ad set"

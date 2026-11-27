@@ -982,7 +982,8 @@ def execute(
     entity_parents: dict[str, str] | None = None,
 ) -> RunContext:
     """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage.
-    ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else.
+    ``entity_names`` (J4, S16) and ``entity_parents`` (J4R.2 (10)) are stored on the snapshot as
+    given; they change nothing else.
     ``extra_dataset_hashes`` (J2, S31) joins the file hashes in ``dataset_hashes`` on the run
     record and the snapshot; ``row_keys`` (sorted) and ``rows_form`` go on the snapshot only."""
     started = utcnow()
@@ -1242,6 +1243,7 @@ def execute(
         client_id=manifest.client_id,
         conversion_kind=request.conversion_kind,
         entity_names=dict(entity_names or {}),
+        entity_parents=dict(entity_parents or {}),
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,
