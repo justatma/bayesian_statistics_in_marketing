@@ -199,6 +199,22 @@ _POLARITY = {
 }
 _SIZE_WORDS = frozenset({"higher", "lower", "more", "fewer", "less", "highest", "lowest"})
 _COST_METRICS = frozenset({"cpa", "cpc", "cpm"})
+# J5 (S11, S15): on a lead run the cost per sign-up displays and is checked in cents.
+_LEAD_UNIT_MONEY = frozenset({"cpa"})
+_PURCHASE_WORD_RE = re.compile(
+    r"(?<![\w-])(?:" + "|".join(re.escape(w) for w in V.PURCHASE_WORDS) + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def display_value(q: Quantity, x: float, conversion_kind: str = "purchase") -> str:
+    """One summary value of a quantity as a run of this conversion kind shows it. A purchase run
+    is ``V.fmt_value`` unchanged; a lead run shows its cost per sign-up at
+    ``unit_money_decimals`` (J5, S15)."""
+    if conversion_kind == "lead" and q.name in _LEAD_UNIT_MONEY:
+        d = int(V.phrasing()["rounding"]["unit_money_decimals"])
+        return f"{float(x):,.{d}f}"
+    return V.fmt_value(q, x)
 
 
 def _word_re(w: str) -> re.Pattern[str]:
@@ -321,6 +337,8 @@ class _Exact(set):
 class _Bundle:
     b: ReportBundle
     vocab: dict[str, str]  # lower-case -> as in the bundle
+    labels: dict[str, str]  # J5: the run's conversion kind's metric labels
+    aliases: dict[str, tuple[str, ...]]  # and its metric words
     displays: dict[str, _Exact] = field(default_factory=dict)  # quantity_id -> values
     plain_ok: _Exact = field(default_factory=_Exact)
     money_ok: _Exact = field(default_factory=_Exact)
@@ -347,12 +365,14 @@ def _index(bundle: ReportBundle) -> _Bundle:
     for c in bundle.comparisons:
         for o in c.options:
             vocab[o.lower()] = o
-    ix = _Bundle(bundle, vocab)
+    kind = bundle.conversion_kind
+    metric_labels, metric_aliases = V.labels(kind)
+    ix = _Bundle(bundle, vocab, metric_labels, metric_aliases)
     for q in bundle.quantities:
         shown = ix.displays[q.quantity_id] = _Exact()
         for v in q.estimate.summary.values():
             if V.finite(v):
-                shown.add(_dec(V.fmt_value(q, v)))
+                shown.add(_dec(display_value(q, v, kind)))
         f = q.feasibility
         # D31.4: the raw counts the bundle carries for a quantity. Quantity has only n_events
         # (D22); clicks, impressions and spend are not in the bundle (open question).
@@ -415,7 +435,7 @@ def _ctx(text: str, ix: _Bundle) -> _Ctx:
         if m:
             found.append((m.start(), e))
     metrics = set()
-    for name, aliases in V.METRIC_ALIASES.items():
+    for name, aliases in ix.aliases.items():
         if any(_word_re(a).search(low) for a in aliases):
             metrics.add(name)
     if "contribution_per_click" in metrics:
@@ -483,16 +503,32 @@ def _check_numbers(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
         metrics = c.metrics or s.metrics
         rel = _about(entities, metrics, ix.b.quantities)
         toks = _tokens(clause)
+        purchase = _purchase_word(clause, ix)
         for t in toks:
             if t.kind == "abbrev":
                 reasons.append(
                     f"{t.text}: abbreviated or scaled figure; write the full figure (D31.5)"
                 )
                 continue
+            if purchase is not None:
+                reasons.append(
+                    f"{t.text}: worded with {purchase!r}, a purchase word; this account converts "
+                    "on sign-ups (J5)"
+                )
+                continue
             reasons += _check_token(t, clause, rel, metrics, entities, caveat, ix, phr)
         for word in _leftover_numbers(clause, toks):
             reasons.append(f"{word}: number written in a form the checker cannot read")
     return reasons
+
+
+def _purchase_word(clause: str, ix: _Bundle) -> str | None:
+    """On a lead run, the first purchase word in the clause, as written (J5). A lead account
+    converts on sign-ups, so no figure can be worded as an order or a purchase."""
+    if ix.b.conversion_kind != "lead":
+        return None
+    m = _PURCHASE_WORD_RE.search(clause)
+    return m.group(0) if m else None
 
 
 def _check_token(
@@ -553,7 +589,7 @@ def _check_token(
     if entities:
         named.append(", ".join(entities))
     if metrics:
-        named.append(", ".join(V.METRIC_LABELS[m] for m in sorted(metrics)))
+        named.append(", ".join(ix.labels[m] for m in sorted(metrics)))
     where = f" for {' / '.join(named)}" if named else ""
     return [f"{t.text}: number matches no bundle value{where} at the registry's rounding"]
 
@@ -567,7 +603,7 @@ def _check_not_knowable(s: _Ctx, ix: _Bundle, phr: dict[str, Any]) -> list[str]:
         if q.feasibility.status == "below_floor" or q.quantity_id in nk_ids:
             ent = ", ".join(sorted(V.entities_of(q) & set(s.entities)))
             reasons.append(
-                f"{ent}: {V.METRIC_LABELS[q.name]} ({q.quantity_id}) is not knowable and may "
+                f"{ent}: {ix.labels[q.name]} ({q.quantity_id}) is not knowable and may "
                 f"appear only as {phr['not_knowable']!r}"
             )
     return reasons

@@ -421,7 +421,18 @@ def conversion_kind_of(s: pipeline.RunSnapshot) -> str:
     """J5: the snapshot's own conversion kind, or, for a snapshot saved before J5, the client
     config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a synthetic
     or unconfigured client is "purchase"."""
-    raise NotImplementedError
+    if s.conversion_kind is not None:
+        return s.conversion_kind
+    if s.synthetic:
+        return "purchase"
+    from bayesian_marketing.live import config as live_config
+    from bayesian_marketing.live import refresh as live_refresh
+
+    try:
+        cfg = live_config.load_client(s.client_id)
+    except (FileNotFoundError, ValueError):
+        return "purchase"
+    return live_refresh._conversion_kind(cfg)
 
 
 def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) -> ReportBundle:
@@ -438,6 +449,7 @@ def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) 
         diagnostics=s.diagnostics,
         knowability=s.knowability,
         narrative_blocks=blocks,
+        conversion_kind=conversion_kind_of(s),  # type: ignore[arg-type]
     )
 
 

@@ -18,7 +18,7 @@ from typing import Any
 import jinja2
 
 from bayesian_marketing.claims import vocab as V
-from bayesian_marketing.claims.check import check_narrative
+from bayesian_marketing.claims.check import check_narrative, display_value
 from bayesian_marketing.core import (
     DiagnosticsReport,
     GateFailure,
@@ -116,14 +116,15 @@ def _status_label(status: str, phr: dict[str, Any]) -> str:
     return phr["not_knowable"] if status == "below_floor" else status
 
 
-def _finding(q: Quantity, phr: dict[str, Any]) -> dict[str, Any]:
+def _finding(q: Quantity, phr: dict[str, Any], conversion_kind: str = "purchase") -> dict[str, Any]:
     s = q.estimate.summary
+    metric_labels, _ = V.labels(conversion_kind)
     return {
         "entity": _entity(q),
-        "label": V.METRIC_LABELS[q.name],
-        "estimate": V.fmt_value(q, s["mean"]),
-        "low": V.fmt_value(q, s["q05"]),
-        "high": V.fmt_value(q, s["q95"]),
+        "label": metric_labels[q.name],
+        "estimate": display_value(q, s["mean"], conversion_kind),
+        "low": display_value(q, s["q05"], conversion_kind),
+        "high": display_value(q, s["q95"], conversion_kind),
         "status": q.feasibility.status,
         "status_label": _status_label(q.feasibility.status, phr),
         "caveat": phr["caveat_marginal"] if q.feasibility.status == "marginal" else None,
@@ -148,10 +149,13 @@ def _fill(template: str, slots: dict[str, Any]) -> str | None:
     return text + "."
 
 
-def _not_knowable(q: Quantity, phr: dict[str, Any]) -> dict[str, Any]:
+def _not_knowable(
+    q: Quantity, phr: dict[str, Any], conversion_kind: str = "purchase"
+) -> dict[str, Any]:
     f = q.feasibility
+    metric_labels, _ = V.labels(conversion_kind)
     slots = {
-        "quantity": f"{V.METRIC_LABELS[q.name]} for {_entity(q)}",
+        "quantity": f"{metric_labels[q.name]} for {_entity(q)}",
         "available": V.fmt_count(f.available) if V.finite(f.available) else None,
         "required": V.fmt_count(f.required)
         if f.required is not None and V.finite(f.required)
@@ -319,8 +323,9 @@ def _diag_rows(d: DiagnosticsReport, thr: dict[str, Any]) -> list[tuple[str, str
 def _knowability(bundle: ReportBundle, phr: dict[str, Any]) -> dict[str, Any]:
     k = bundle.knowability
     by_id = {q.quantity_id: q for q in bundle.quantities}
+    metric_labels, _ = V.labels(bundle.conversion_kind)
     nk = [
-        f"{V.METRIC_LABELS[by_id[i].name]} for {_entity(by_id[i])}" if i in by_id else i
+        f"{metric_labels[by_id[i].name]} for {_entity(by_id[i])}" if i in by_id else i
         for i in k.not_knowable
     ]
     return {
@@ -388,9 +393,9 @@ def render(bundle: ReportBundle, out_dir: Path) -> RenderedReport:
         "window": _window(bundle),
         "narrative": narrative,
         "recommendations": [_recommendation(r, bundle, phr, tmpl) for r in bundle.recommendations],
-        "findings": [_finding(q, phr) for q in shown],
+        "findings": [_finding(q, phr, bundle.conversion_kind) for q in shown],
         "comparisons": _comparisons(bundle, phr),
-        "not_knowable": [_not_knowable(q, phr) for q in hidden],
+        "not_knowable": [_not_knowable(q, phr, bundle.conversion_kind) for q in hidden],
         "know": _knowability(bundle, phr),
         "conjugate_phrase": NO_SAMPLER if conjugate else None,
         "diagnostics": [
