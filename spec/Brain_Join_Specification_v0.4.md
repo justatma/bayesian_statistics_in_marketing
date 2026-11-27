@@ -319,3 +319,16 @@ Any other unit fails the slot ("unit not renderable").
 (10) A run's client is read from the whole file, not its head. A file whose head and body name different clients fails as unreadable.
 (11) The lint's sentence splitter doesn't split after "e.g.", "i.e.", "etc." or "vs.".
 (12) A zero-width or other Cf character is refused under (1), so it can't join two words into one.
+
+### The threat model, and S26 (the Principal Architect, 27 Nov)
+
+Threat model. The writer is Imani, composing in good faith from a menu of rendered figures, under instructions that say figures go in slots. The failure J4R guards against is an honest one: she types a figure she half remembers, or attaches a figure to the wrong ad. Honest figures come as digits or as correctly spelled words. The guarantee is exact on character classes (the allow list of S25 (1)). On words it is list-based, with folding, and it guards an honest writer, not an evasive one. Spellings made to get past a filter ("séven", "t.e.n", "sevn") are out of scope for blind review. Reviews hunt faults on honest input, and above all wrong renderings by our own code. The residue is caught where it can be seen: every template is in AtmaOS's ledger, and the refusal log counts what the rule stops. The after-acceptance check reads the sent templates for any quantity that got through outside a slot. If one does on honest writing, that word goes on the list with a test.
+
+The recorded next step, if the count ever shows a pattern: a word allow list. Outside slots, every token must be a dictionary word or an inflection of one, with every quantity word removed and a registry list of modern and platform words added. It was proposed on 27 Nov after review2/J4R (c198467), with the examples "Xii", "fiftypercent", "twodozen", "séven", "nİne", "X.I.I", "t.e.n", "lOO" and "fiftyish". It was not adopted, because a Webster list holds quantity words of its own, so it would be a deny list again, and because it would cost retries on ordinary speech, which matters more.
+
+S26. (1) Same slot, same text: a slot renders byte for byte the same whatever else is in the text. (2) The folds before the word check:
+- NFKD, dropping combining marks;
+- casefold, with İ and ı mapped to i;
+- removing single separators (".", "-", "'", space) between single letters inside a run, so that "t.e.n" becomes "ten";
+- glued forms, meaning a listed word preceded or followed by another listed word or by "percent", "ish", "something" or "fold".
+Stop there. (3) The plain-letter Roman numeral check is dropped, because "I", "mix", "did", "civil" and "vivid" are made of Roman letters. Unicode numeral glyphs (category Nl) are refused by the character allow list. Review cases that expected "XII", "IV", "MMXXVI", "vii", "Xii" or "X.I.I" to fail now expect them to pass, and each such edit is recorded. (4) S25 (7)'s default "without it, the subject is the account" is withdrawn. A quantity with no subject fails its slot.
