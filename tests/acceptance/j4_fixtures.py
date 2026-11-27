@@ -212,7 +212,15 @@ def entries(limit: float = 1500) -> list[dict[str, Any]]:
             "The account spending limit is $1,500.",
             "observed",
             "account",
-            quantities=[{"name": "account_spending_limit", "value": limit, "unit": "USD"}],
+            # subject added by the integrator (B30): S26 (4) fails a quantity that states none
+            quantities=[
+                {
+                    "name": "account_spending_limit",
+                    "value": limit,
+                    "unit": "USD",
+                    "subject": {"level": "account"},
+                }
+            ],
             tags=["spending_limit"],
         ),
         _entry(
