@@ -6,8 +6,8 @@ import re
 
 import pytest
 import yaml
-from tests.acceptance.test_J5 import J5Env, LEAD, config, lead_run, purchase_run
 from tests.acceptance.conftest import iso  # noqa: F401
+from tests.acceptance.test_J5 import LEAD, J5Env, config, lead_run, purchase_run
 from tests.fakes import builders as B
 
 from bayesian_marketing import core as C
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.piece("J5")
 
 
 @pytest.fixture
-def env(iso, tmp_path, monkeypatch) -> J5Env:
+def env(iso, tmp_path, monkeypatch) -> J5Env:  # noqa: F811
     return J5Env(tmp_path, monkeypatch)
 
 
