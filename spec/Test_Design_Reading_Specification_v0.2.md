@@ -199,3 +199,5 @@ J6.S2 (the Arkwright Engineer and the Principal Architect, 27 Nov).
    - `engine_version`.
 
    Check: its values equal the registries', and `rule_ref` equals a reading's.
+
+J6.S3 (the Arkwright Engineer, 27 Nov). How cost is rounded, exactly. `cost_of_test` = `(Decimal(repr(unit_cost)) * exposed_units).quantize(Decimal("0.01"), ROUND_HALF_UP)`, where `exposed_units` is the integer from rule 13, sent as a JSON number (`float` of that Decimal). `repr` gives the shortest decimal that reads back as the unit cost's double, which is the figure the sender meant. The product with an integer is then exact, so a half-cent edge rounds as written. Rounding the float product instead differs at such edges: 0.155 × 3 is 0.46499999999999997 as floats, and that would give 0.46 where the rule gives 0.47. Check: (i) gains 0.155 × 3 = 0.47 and 0.015 × 3 = 0.05.
