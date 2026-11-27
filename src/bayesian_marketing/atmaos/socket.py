@@ -539,3 +539,17 @@ def render_report(run_id: str, kind: str, narrative_blocks: list[dict]) -> str:
     bundle = bundle_of(s, kind, blocks)
     out = pipeline.data_dir() / "reports" / run_id
     return render(bundle, out).html_path
+
+
+def check_client_figures(
+    text: str,
+    refs: list[dict],
+    *,
+    load_run=None,
+    load_release=None,
+) -> dict:
+    """J4: the figure check a persona runs on a sentence before she says it to the client.
+    See ``claims.figures.check_client_figures``; this is its socket entry (F7)."""
+    from bayesian_marketing.claims.figures import check_client_figures as _check
+
+    return dict(_check(text, refs, load_run=load_run, load_release=load_release))

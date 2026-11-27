@@ -11,6 +11,7 @@ route_plain:
   nuts: "joint funnel model"
   deterministic: "direct calculation"
 caveat_marginal: "this estimate is still rough"
+caveat_marginal_aliases: ["still rough", "a rough estimate", "still an estimate"]  # J4 (S7); check_narrative reads only caveat_marginal
 not_knowable: "not knowable yet"
 not_knowable_block: >-
   Not knowable yet: {quantity}. We have {available}; we need about {required}. Getting there costs
