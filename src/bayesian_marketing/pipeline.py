@@ -165,6 +165,8 @@ class RunSnapshot(BaseModel):
     entity_names: dict[str, str] = {}
     # J4R.2 (10): ad id -> ad set id as the pull read them; empty before J4R.2
     entity_parents: dict[str, str] = {}
+    # J7 (8): the account's IANA time zone as Meta reports it, from the pull; None before J7
+    timezone: str | None = None
     manifest_id: str
     dataset_hashes: list[str]
     # J2 (S31): the bayes-rows-c1 keys of the rows the run read, sorted; empty before J2

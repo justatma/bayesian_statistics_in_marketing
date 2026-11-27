@@ -596,6 +596,7 @@ def client_slots(
     load_names=None,
     load_parents=None,
     load_display_names=None,
+    load_held=None,
 ) -> dict:
     """J4R: the menu of figure slots for a client (C3). See ``claims.slots.client_slots``."""
     from bayesian_marketing.claims.slots import client_slots as _menu
@@ -608,6 +609,7 @@ def client_slots(
             load_names=load_names,
             load_parents=load_parents,
             load_display_names=load_display_names,
+            load_held=load_held,
         )
     )
 
@@ -621,6 +623,7 @@ def render_client_text(
     load_names=None,
     load_parents=None,
     load_display_names=None,
+    load_held=None,
 ) -> dict:
     """J4R: render a persona's text with its slots (C1 to C7). See
     ``claims.slots.render_client_text``. ``ok`` False gives ``text`` None."""
@@ -635,5 +638,6 @@ def render_client_text(
             load_names=load_names,
             load_parents=load_parents,
             load_display_names=load_display_names,
+            load_held=load_held,
         )
     )
