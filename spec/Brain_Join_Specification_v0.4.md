@@ -205,76 +205,77 @@ S21. Newest. For a run, it's the latest `started_at` in the run record among tha
 S22. Generic money words ("spend", "spent", "budget", "cost") don't name a measure. A measure is named only by a metric alias, or by a notebook quantity's name words or its entry's tags.
 S23 (the J4 test writer, second pass). (1) `value_at_rounding` is the matched quantity's value as the engine displays it for that run's kind: cents for cost-per on a lead run, the registry's rounding otherwise. It is not the precision the figure was compared at. So "$3" placed on a 3.35 cpa gives "$3.35". (2) For runs with the same `started_at`, the greater run id is newest. (3) The newest release is the greatest (day, n) among the client's releases that no other release names as its parent. (4) Under S20, only `check_narrative`'s comparative and causal reasons are added, never its number reasons, which would refuse a numeric ad id as a figure.
 
-## J4R. Rendered figures (v0.4 draft, replaces J4's free-text reading once agreed)
+## J4R. Rendered figures (v0.4, in place of J4's free-text reading)
 
-Why: two blind reviews of J4 on Sonnet found 12 and then 14 false passes of wrong figures (`tests/review/test_J4_review.py`, `tests/review/test_J4_review2.py` on review2/J4 b3e71c9). Each came from inferring, out of free prose, which number means which quantity of which ad. Proposed 26 Nov by the Bayesian Engineer. The Head Engineer supports it; it waits on the Principal Architect. Under J4R the engine writes every figure, and the persona's own words carry none.
+Why: two blind reviews of J4 on Sonnet found 12 and then 14 false passes of wrong figures (`tests/review/test_J4_review.py`; `tests/review/test_J4_review2.py` on review2/J4 b3e71c9). Each came from inferring, out of free prose, which number means which quantity of which ad. The Bayesian Engineer proposed this design on 26 Nov. The Head Engineer supports it, and the Principal Architect advises it under seven conditions (C1 to C7 below), all taken. The engine writes every figure, and the persona's own words carry none. The free-text `check_client_figures` is not merged, and the socket's stub keeps raising until J4R passes review.
 
-### The call
+### Slots
 
-`bayesian_marketing.atmaos.socket.render_client_text(text: str, *, load_run=None, load_release=None, load_names=None) -> dict`
-
-Returns:
-
-```json
-{
-  "ok": true,
-  "text": "<the text with every placeholder rendered>",
-  "placeholders": [
-    {"token": "{fig:clm_0003}", "ok": true, "rendered": "IMG3_TXT1's click-through rate, about 4.4% (still a rough estimate)",
-     "ref": {"kind": "claim", "claim_id": "clm_0003"}, "quantity": {"name": "ctr", "subject": "1202...0526", "status": "marginal"},
-     "newest": true, "reasons": []}
-  ],
-  "reasons": [],
-  "engine_version": "...", "inputs_hash": "...", "checked_at": "..."
-}
-```
-
-`ok` is true only when every placeholder renders and the free words pass the words rule. When `ok` is false, `text` is null. The caller drops the sentence or the reply and never sends a partial rendering.
-
-### Placeholder grammar
+A slot is a Brain contract: a figure is a claim quantity in the Core (`claims`, `claim_quantities`), rendered by its producer's renderer (C2). The engine owns the renderer for Bayesian claims only. AtmaOS resolves a Core claim id to its engine item before it calls the engine, which never reads the Brain (F7). It passes the claim id along for the echo.
 
 ```
-placeholder := "{" kind ":" ref [ "|" option ]* "}"
-kind        := "fig" | "cmp" | "name"
-ref         := claim_id                       ; an AtmaOS claim id: the caller resolves it to its engine item first
-             | "run/" run_id "/" quantity_id  ; a posterior quantity
-             | "nb/" release_id "/" entry_id [ "/" quantity_name ]
-             | "run/" run_id                  ; for cmp only: that run's comparison
-option      := "short"                        ; value and caveat only, no subject or measure
-             | "bounds"                       ; the 90% interval as well: "about 4.4% (4.0% to 4.7%)"
+slot      := "{" kind ":" ref [ "|" form ] "}"
+kind      := "fig" | "cmp" | "name" | "date"
+ref       := "run/" run_id "/" quantity_id [ "#" claim_id ]          ; a posterior quantity
+           | "nb/" release_id "/" entry_id "/" quantity_name [ "#" claim_id ]
+           | "run/" run_id [ "#" claim_id ]                          ; cmp: that run's comparison
+           | "ad/" entity_id                                         ; name: a subject's display name
+           | iso_date | iso_datetime                                 ; date: passed through untouched
+form      := "full" | "start"
 ```
 
-Claim ids cross the socket already resolved: AtmaOS replaces `{fig:<claim_id>}` with the claim's engine item, keeping the claim id for the echo, as `{fig:run/<run>/<q>#<claim_id>}` or `{fig:nb/<rel>/<entry>/<q>#<claim_id>}`. The engine never reads the Brain (F7).
+`date` slots belong to the turn step. The engine leaves them as they are, and AtmaOS renders them after it (C2a). The run and notebook forms are this engine's addresses. Once posterior claims are in the Core, the Core's `{fig:<claim_id>/<quantity_id>}` resolves to them (C2b).
 
-### How a placeholder renders
+### Forms (C4)
 
-All wording comes from the registry, with lead labels on a lead account (J5):
-- `fig`: "<subject>'s <measure label>, <value>", followed by the status phrase.
-  - Estimable: the value is the median at the engine's display rounding.
-  - Marginal: "about <median>" plus the `caveat_marginal` phrase.
-  - Below floor: "<subject>'s <measure label> is not knowable yet", with no number.
-  - An observed notebook quantity: its value, with no caveat.
-  - When the ref isn't the newest for the client, add " (as of <window end or release day>)".
-- `cmp`: the comparison's leader and its p_best: "<leader> is ahead on <unit>, with a <p>% chance of being best". When the comparison is not decided, the leader's p_best is below 0.5, or the decision's status is marginal, the phrase adds the caveat. When it is below floor, it renders "which ad is best is not knowable yet".
-- `name`: the subject's display name, so the persona can name an ad without typing it.
+Each `fig` and `cmp` slot has two forms, and the caveat, the floor wording and the "as of" date stay inside both. The labels are J5's: lead labels on a lead account. There is no form that drops the subject (C4).
 
-### The words rule (what the reviews can still attack, kept small)
+| Status | `full` | `start` |
+|---|---|---|
+| estimable | "IMG3_TXT1's click-through rate of 4.4%" | "IMG3_TXT1's click-through rate is 4.4%" |
+| marginal | "IMG3_TXT1's click-through rate of about 4.4%, still a rough estimate" | "IMG3_TXT1's click-through rate is about 4.4%, still a rough estimate" |
+| below floor | "IMG3_TXT1's click-through rate, which is not knowable yet" | "IMG3_TXT1's click-through rate is not knowable yet" |
+| observed (notebook) | "the account spending limit of $1,500" | "The account spending limit is $1,500" |
+| not newest | the same, followed by ", as of 20 November" | the same |
 
-After the placeholders are removed, the remaining text must contain none of the following:
-- any digit in any script (Unicode category Nd), or any numeric character (categories No and Nl), which covers fraction glyphs;
-- any spelled number or quantity word: an explicit list, `QUANTITY_WORDS` (zero to a billion, half, third, quarter, dozen, couple, several, handful, most, majority, minority, double, triple, twice, thrice and the like, with their -fold, -ly and -ing forms);
-- any `%`, `‰` or currency sign, or any currency code from the client's currency list;
-- any comparative or causal word from the registry lexicons in a sentence that names an ad (by a `name` placeholder or a known name). A comparison must be a `cmp` placeholder.
+`cmp` renders from the run's own comparison record, never from two figures (C5):
+- full: "IMG3_TXT1, which leads on clicks with a 62% chance of being best", plus the caveat when the decision is marginal or the leader's p_best is under 0.5;
+- below floor: "which ad is best, not knowable yet".
 
-Any hit fails the call, quoting the word. Ordinary words like "a" and "one of" are on an explicit allow list, and the test covers both lists in full.
+`name` renders the display name.
+
+### The calls
+
+`socket.client_slots(client_id: str, *, load_run=None, load_release=None, load_names=None) -> dict` is the menu (C3). It lists every slot this engine can render for the client's newest run and newest notebook release: each slot's ref, kind, the measure, the subject, status, newest, both forms rendered, and the run id or release id behind it. AtmaOS maps them to claim ids, hands the menu to the persona before she writes, and refuses any slot not on it.
+
+`socket.render_client_text(text: str, *, load_run=None, load_release=None, load_names=None) -> dict` renders. It returns `ok`, `text`, `template` (the input, unchanged), `slots` (one row per slot: its token, `ok`, `rendered`, ref, claim id, run id or release id, quantity, status, newest, reasons), `reasons`, `lint` (comparative-word hits; see below), `engine_version`, `inputs_hash` and `checked_at`. `ok` is true only when every slot renders and the numeral rule passes. When `ok` is false, `text` is null, and the caller never sends a partial rendering. AtmaOS's ledger keeps both the template and the rendered text, with each slot's claim id and run id (C6).
+
+### The numeral rule (the guarantee)
+
+After every slot is removed, the text must contain none of the following:
+- any character of Unicode category Nd, No or Nl (digits in every script, fraction glyphs, numeric letters);
+- any word in `QUANTITY_WORDS`, an explicit, frozen list: zero to twenty, the tens, hundred, thousand, million, billion, half, halves, third, quarter, dozen, couple, few, several, handful, score, most, majority, minority, double, doubled, triple, tripled, twice, thrice, single, sole, and every one with -fold, -ly, -s and -th forms where English has them, plus "a pair of", "a number of" and "the bulk of";
+- any of `%`, `‰`, `％`, `٪`, "percent", "per cent", "pct", "percentage", "basis point";
+- any currency sign (Unicode category Sc), or any ISO 4217 code as a whole word.
+
+A hit fails the call and quotes the word. Bare counts like "two ads" are forbidden; she can say "both ads" (C2). "Both", "each", "all", "every", "none", "either" and "neither" stay allowed. The guarantee covers this rule only.
+
+### The comparative lint (not the guarantee)
+
+A sentence that names an ad (by a `name` slot or a known name) and holds a word from the registry's comparative or causal lexicon, outside a `cmp` slot, is listed in `lint`. It also fails the call. This is a fixed word list, not a reader. It will miss phrasings, and the spec does not claim more for it (C1).
 
 ### Checks (frozen before the build)
 
-These are kept from J4: (f) below floor, (i) unreadable refs, (m) two clients, (p) staleness, P4 loaders, S16 names, S21 newest, and the J5 lead labels. These are new:
-- Every reviewer finding in both review files is re-expressed as a case. Its wrong figure can't be written as free text (the words rule fails it), and its placeholder form renders the right figure.
+Kept from J4: (f) below floor, (i) unreadable refs, (m) two clients, (p) staleness, P4 loaders, S16 names, S21 newest, and the J5 lead labels, each expressed as slot rendering. New checks:
+- Every case in both J4 review files, re-expressed as the free text the persona might write, fails the numeral rule (C7).
 - Every word in `QUANTITY_WORDS` fails.
-- Every Nd, No and Nl character in a sample of 50 across scripts fails.
-- Each status renders its phrase.
+- 50 characters sampled across Nd, No and Nl in several scripts each fail.
+- Each status, in each form, renders its phrase.
 - `ok` false gives `text` null.
+- `client_slots` lists only the client's newest run and release, and every slot it lists renders.
+- An unknown slot ref fails.
+- `date` slots pass through untouched.
+- "both ads" passes, and "two ads" fails.
+- `cmp` renders from the comparison record, and a test proves no subtraction happens.
 
-The free-text J4 (`check_client_figures`) is not merged. Its code for loading refs, staleness, names and labels moves into the renderer.
+The code for loading refs, staleness, names and labels comes over from the unmerged J4 branch (piece/J4 at 3ebcd01).
