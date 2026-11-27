@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from bayesian_marketing.core.records import ClientConfig
 from bayesian_marketing.live import config as live_config
 from tests.acceptance import j4_fixtures as X  # noqa: F401
+from tests.acceptance import j4r_fixtures as _j4r
 from tests.acceptance.conftest import iso  # noqa: F401
 from tests.acceptance.j4_fixtures import CLIENT, IMG2_ID, IMG3_ID
 from tests.acceptance.j4r2_fixtures import (
@@ -36,6 +37,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 @pytest.fixture
 def env(iso, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> J4R2Env:  # noqa: F811
+    _j4r.hold_raw(monkeypatch)  # J7: these cases render raw statuses (see j4r_fixtures.raw_held)
     monkeypatch.delenv("BAYES_LIVE_DIR", raising=False)
     return J4R2Env(tmp_path, monkeypatch)
 

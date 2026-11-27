@@ -10,6 +10,7 @@ import pytest
 
 from bayesian_marketing.claims import slots as S
 from tests.acceptance import j4_fixtures as X
+from tests.acceptance import j4r_fixtures as _j4r
 from tests.acceptance.conftest import iso  # noqa: F401
 from tests.acceptance.j4_fixtures import CLIENT, E_BUDGET, E_LIMIT, IMG2_ID, IMG2_NAME, IMG3_ID
 from tests.acceptance.j4r_fixtures import J4REnv, cmp_run, fig_nb, fig_run, name_slot
@@ -21,6 +22,7 @@ A, B = name_slot(IMG3_ID), name_slot(IMG2_ID)
 
 @pytest.fixture
 def env(iso, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> J4REnv:  # noqa: F811
+    _j4r.hold_raw(monkeypatch)  # J7: these cases render raw statuses (see j4r_fixtures.raw_held)
     return J4REnv(tmp_path, monkeypatch)
 
 

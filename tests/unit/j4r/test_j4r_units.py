@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from tests.acceptance import j4_fixtures as X
+from tests.acceptance import j4r_fixtures as _j4r
 from tests.acceptance.conftest import iso  # noqa: F401  (the isolated store, autouse)
 from tests.acceptance.j4_fixtures import CLIENT, IMG2_ID, IMG2_NAME, IMG3, IMG3_ID
 from tests.acceptance.j4r_fixtures import J4REnv, fig_run, name_slot
@@ -338,6 +339,7 @@ def test_execute_takes_entity_names() -> None:
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> J4REnv:
+    _j4r.hold_raw(monkeypatch)  # J7: these cases render raw statuses (see j4r_fixtures.raw_held)
     return J4REnv(tmp_path, monkeypatch)
 
 

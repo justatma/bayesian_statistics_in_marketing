@@ -36,7 +36,8 @@ class MenuItem(TypedDict):
     kind: SlotKind
     measure: str | None
     subject: str | None
-    status: str | None
+    status: str | None  # J7 (5): the held status for a run's fig and cmp
+    status_raw: str | None  # J7 (5): the status as the run stored it
     newest: bool
     run_id: str | None
     release_id: str | None
@@ -660,6 +661,27 @@ class _Ctx:
     names_reasons: list[str] = field(default_factory=list)
     #: S38 (2): reasons from ``load_parents`` and ``load_display_names``, for the menu only
     qualify_reasons: list[str] = field(default_factory=list)
+    helds: dict[str, dict | str] = field(default_factory=dict)  # str: why it is not available
+
+    def held(self, run_id: str) -> dict:
+        """S39 (10): the run's held statuses from ``load_held``. When it raises or gives null,
+        every fig and cmp slot of the run fails with that reason; never a fall back to raw."""
+        if run_id not in self.helds:
+            try:
+                got = self.load_held(run_id)
+                if got is None:
+                    raise ValueError("the loader gave no held status")
+                if not isinstance(got, dict):
+                    raise TypeError(f"the loader gave {type(got).__name__}, not a dict")
+                self.helds[run_id] = got
+            except Exception as exc:
+                self.helds[run_id] = (
+                    f"run {run_id}: held status not available ({type(exc).__name__}: {exc})"
+                )
+        got = self.helds[run_id]
+        if isinstance(got, str):
+            raise _Fail(got)
+        return got
 
     def _run_kind(self, snap: Any) -> str:
         """R9: the snapshot's own kind; for one saved before J5, the config's, then "lead" if
@@ -1001,6 +1023,18 @@ class _Out:
     newest: bool | None
     run_id: str | None = None
     release_id: str | None = None
+    status_raw: str | None = None  # J7 (5): a run's stored status; the quantity's otherwise
+
+
+def _held_of(held: dict, k: tuple[str, ...], raw: str, what: str) -> str:
+    """S39 (10): the held status of one key. Missing or unknown fails the slot. A held status
+    above raw is taken down to raw, which is never above it by construction."""
+    from bayesian_marketing.claims import held as H
+
+    got = held.get(k)
+    if got not in H.ORDER:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: no held status for {what}")
+    return min(str(got), raw, key=H.rank)
 
 
 def _check_client(client: str, want: str, what: str) -> None:
@@ -1013,13 +1047,13 @@ def _run_value(q: Any) -> float | None:
     return next((summ[k] for k in ("q50", "mean", "value") if _finite(summ.get(k))), None)
 
 
-def _run_fig(run: _Run, q: Any, names: _Names) -> dict[str, str]:
+def _run_fig(run: _Run, q: Any, names: _Names, status: str) -> dict[str, str]:
+    """``status`` is the held status (J7 (5)); the value is the run's own."""
     snap = run.snap
     level = q.scope.level
     eid = None if level == "account" else q.scope.ids.get(level)
     subj, is_name = _subject(level, eid, names)
     label = V.labels(run.kind)[0].get(q.name, str(q.name).replace("_", " "))
-    status = q.feasibility.status
     value = None
     if status != "below_floor":
         x = _run_value(q)
@@ -1047,22 +1081,35 @@ def _leader(comp: Any) -> tuple[str, float]:
     return str(leader), p
 
 
-def _cmp(run: _Run, names: _Names) -> tuple[dict[str, str], SlotQuantity]:
-    """C5: from the run's comparison record and decision only, never from two figures."""
+def _cmp(run: _Run, names: _Names, held: dict) -> tuple[dict[str, str], SlotQuantity, str]:
+    """C5: from the run's comparison record and decision only, never from two figures. The
+    status is the decision's held status (S39 (5)); a run with no decision stays marginal.
+    Returns the forms, the quantity and the raw status."""
+    from bayesian_marketing.claims import held as H
+
     snap = run.snap
     comp = snap.comparison
     if comp is None or not comp.p_best:
         raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no comparison")
-    status = snap.decision.status if snap.decision is not None else "marginal"
+    raw = snap.decision.status if snap.decision is not None else "marginal"
+    status = raw
+    if snap.decision is not None:
+        status = _held_of(
+            held, H.decision_key(run.kind, snap.metric), raw, f"the decision of run {snap.run_id}"
+        )
     as_of = "" if run.newest else _as_of(run.as_of)
     leader, p = _leader(comp)
     quantity: SlotQuantity = {"name": "p_best", "subject": leader, "status": status}
     if status == "below_floor":
         nk = str(V.phrasing()["not_knowable"])
-        return {
-            "full": f"which ad is best, {nk}{as_of}",
-            "start": f"Which ad is best is {nk}{as_of}",
-        }, quantity
+        return (
+            {
+                "full": f"which ad is best, {nk}{as_of}",
+                "start": f"Which ad is best is {nk}{as_of}",
+            },
+            quantity,
+            raw,
+        )
     if not _finite(p):
         raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no p_best for its leader")
     unit = _CMP_UNITS.get(comp.unit, str(comp.unit))
@@ -1072,18 +1119,19 @@ def _cmp(run: _Run, names: _Names) -> tuple[dict[str, str], SlotQuantity]:
     if p < 0.5 or (len(ranked) > 1 and ranked[0] - ranked[1] <= CMP_CLOSE + 1e-12):
         # S27: too close to call, or no leader past one half: no ad is named
         neither = f"neither ad leads yet on {unit}, {ROUGH}"
-        return {"full": neither + as_of, "start": _start(neither, False) + as_of}, quantity
+        return {"full": neither + as_of, "start": _start(neither, False) + as_of}, quantity, raw
     subj, is_name = _subject("ad", leader, names)
     subj = re.sub(r"[\s.!?,;:]+$", "", subj)  # S27: no stop of the name mid-sentence
     pct = _fmt_probability(p)
     a = _article(pct)
     caveat = f", {ROUGH}" if status != "estimable" else ""
-    return {
+    forms = {
         "full": f"{subj}, which leads on {unit} with {a} {pct} chance of being best{caveat}{as_of}",
         "start": _start(f"{subj} leads on {unit}, with {a} {pct} chance of being best", is_name)
         + caveat
         + as_of,
-    }, quantity
+    }
+    return forms, quantity, raw
 
 
 def _nb_subject(q: dict[str, Any]) -> tuple[str, str | None]:
@@ -1208,20 +1256,36 @@ def _render_slot(s: _Slot, ctx: _Ctx, names: _Names) -> _Out:
         if isinstance(run, str):
             raise _Fail(run)
         _check_client(str(run.snap.client_id), ctx.client_id, f"run {s.run_id}")
+        if s.kind == "fig" and s.quantity_id in {
+            r.recommendation_id for r in run.snap.recommendations
+        }:  # J7 (9), S39 (13): no recommendation, allocation or share is a slot
+            raise _Fail(f"{R_UNKNOWN_SLOT}: {s.quantity_id} is a recommendation, not a figure")
+        held = ctx.held(s.run_id)  # S39 (10): fails every fig and cmp slot of the run
         if s.kind == "cmp":
-            forms, quantity = _cmp(run, names)
-            return _Out(forms, quantity, run.newest, run_id=s.run_id)
+            forms, quantity, raw = _cmp(run, names, held)
+            return _Out(forms, quantity, run.newest, run_id=s.run_id, status_raw=raw)
         q = next((q for q in run.snap.quantities if q.quantity_id == s.quantity_id), None)
         if q is None:
             raise _Fail(f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_id} in run {s.run_id}")
+        from bayesian_marketing.claims import held as H
+
         level = q.scope.level
         subject = "account" if level == "account" else q.scope.ids.get(level, "account")
+        raw = str(q.feasibility.status)
+        status = _held_of(
+            held,
+            H.quantity_key(level, q.scope.ids.get(level), q.name, run.kind, run.snap.metric),
+            raw,
+            f"quantity {q.quantity_id} of run {s.run_id}",
+        )
         quantity: SlotQuantity = {
             "name": str(q.name),
             "subject": str(subject),
-            "status": q.feasibility.status,
+            "status": status,
         }
-        return _Out(_run_fig(run, q, names), quantity, run.newest, run_id=s.run_id)
+        return _Out(
+            _run_fig(run, q, names, status), quantity, run.newest, run_id=s.run_id, status_raw=raw
+        )
     rel, entry, q = _nb_quantity(s, ctx)
     kind = ctx.kind
     if kind is None:
@@ -1516,6 +1580,7 @@ def client_slots(
                 "measure": q["name"] if q else None,
                 "subject": q["subject"] if q else None,
                 "status": q["status"] if q else None,
+                "status_raw": out.status_raw if out.run_id else (q["status"] if q else None),
                 "newest": bool(out.newest),
                 "run_id": out.run_id,
                 "release_id": out.release_id,
@@ -1534,6 +1599,7 @@ def client_slots(
                 "measure": None,
                 "subject": eid,
                 "status": None,
+                "status_raw": None,
                 "newest": True,
                 "run_id": run_id,
                 "release_id": None,

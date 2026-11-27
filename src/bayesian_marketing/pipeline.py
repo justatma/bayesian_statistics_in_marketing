@@ -1246,6 +1246,8 @@ def execute(
         conversion_kind=request.conversion_kind,
         entity_names=dict(entity_names or {}),
         entity_parents=dict(entity_parents or {}),
+        # J7 (8), S39 (11): the zone of the pull the run read; changes nothing else
+        timezone=next((p.timezone for p in perf if p.timezone), None),
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,

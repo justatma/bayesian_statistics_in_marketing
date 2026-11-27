@@ -38,6 +38,7 @@ from bayesian_marketing.live.store import SqliteStore
 from bayesian_marketing.prior_registry import registry as prior_registry
 from tests.acceptance import j2_fixtures as J2
 from tests.acceptance import j4_fixtures as X
+from tests.acceptance import j4r_fixtures as _j4r
 from tests.acceptance.j4_fixtures import CLIENT, IMG2_ID, IMG3_ID
 from tests.acceptance.j4r2_fixtures import (
     CREATIVE,
@@ -75,6 +76,7 @@ ROUGH = "still a rough estimate"
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> J4R2Env:
+    _j4r.hold_raw(monkeypatch)  # J7: these cases render raw statuses (see j4r_fixtures.raw_held)
     monkeypatch.delenv("BAYES_LIVE_DIR", raising=False)
     return J4R2Env(tmp_path, monkeypatch)
 

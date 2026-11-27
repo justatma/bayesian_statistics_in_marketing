@@ -39,6 +39,7 @@ from bayesian_marketing.atmaos import socket as sock
 from bayesian_marketing.claims import slots as S
 from bayesian_marketing.notebook import release as nb_release
 from tests.acceptance import j4_fixtures as X
+from tests.acceptance import j4r_fixtures as _j4r
 from tests.acceptance.j4_fixtures import (
     CLIENT,
     E_LIMIT,
@@ -92,6 +93,7 @@ AS_OF_REL = ", as of 20 November"
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> J4REnv:
+    _j4r.hold_raw(monkeypatch)  # J7: these cases render raw statuses (see j4r_fixtures.raw_held)
     return J4REnv(tmp_path, monkeypatch)
 
 
