@@ -158,7 +158,7 @@ missing keys absent. `PlatformPull` gains `account: dict[str, str] = {}` (core/d
 version: "2026-11-07"
 freshness_date: "2026-11-07"     # informational; staleness blocks nothing [2.33]
 interval_seconds: 3600
-lookback_days: 7
+lookback_days: 7                 # D55 (27 Nov): 28, with analysis_days: 7 (L12)
 stale_after_seconds: 7200
 recordings_keep_days: 7
 page_refresh_seconds: 300        # [2.35]
@@ -320,7 +320,7 @@ opens the store read-only (`file:...?mode=ro` URI), one connection per request.
 
 - C1. Window [2.24]: the `lookback_days` account-local dates ending today inclusive, today being
   `clock.now()` converted to the account time zone (the latest ok poll's `timezone`, else the
-  config's). For 7: today and the six days before. `poll` calls
+  config's). For 7: today and the six days before. (D55, 27 Nov: the poll reads 28; the engine analyses the last 7, L12.4.) `poll` calls
   `data_contract.connectors.pull.pull(platform, config, window)`. With `record_root` given,
   `BAYES_RECORD_DIR` is set to `<record_root>/<client_id>/<poll_id>` for that call only, inside a
   context manager that restores the previous value [2.23]. The newest ok poll's rows are the
@@ -522,7 +522,7 @@ are shown by the stale banner and not caught up.
 
 ## 7. Owner's answers, 2026-11-07
 
-Lookback 7 days, port 8765 on the loopback address, recordings kept 7 days with rows forever, stale
+Lookback 7 days (D55, 27 Nov: re-read 28, analyse 7; L12), port 8765 on the loopback address, recordings kept 7 days with rows forever, stale
 banner after 2 hours, the name "live view": the defaults stand. Jovannah's economics are approved
 (`configs/economics/jovannah.json`, 17:40 UTC, loss tolerance $150); her CTR priors are not yet, and
 are put to the owner when L4 is reached. G7 exception for the internal page: D42. The "Not shown"
