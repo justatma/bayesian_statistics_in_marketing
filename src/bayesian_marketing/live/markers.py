@@ -94,9 +94,14 @@ def backfill() -> dict[str, int]:
     counts = {"engine_run": 0, "notebook_release": 0}
     runs = pipeline.data_dir() / pipeline.RUNS_DIR
     for path in sorted(runs.glob("run_*.json")) if runs.is_dir() else []:
-        if _existing(path.name) is None:
+        if _existing(path.name) is not None:
+            continue
+        try:
             engine_run_marker(path.stem)
-            counts["engine_run"] += 1
+        except (ValueError, KeyError, TypeError) as exc:  # S37: named, and no marker
+            print(f"{path.name}: not marked: {type(exc).__name__}: {exc}", file=sys.stderr)
+            continue
+        counts["engine_run"] += 1
     root = notebook.root()
     folders = sorted(root.glob("*/releases/nb_*")) if root.is_dir() else []
     for folder in folders:

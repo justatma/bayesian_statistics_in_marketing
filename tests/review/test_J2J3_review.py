@@ -33,7 +33,7 @@ def _ran(env: J2Env, name: str) -> str:
 
 
 def test_R1_backfill_survives_one_unreadable_run_file(env: J2Env) -> None:
-    """One bad run file should not stop the other markers (spec silent; backfill is a recovery tool)."""
+    """One bad run file does not stop the other markers (S37)."""
     env.client()
     env.history(upto="P2")
     runs = [_ran(env, "P1"), _ran(env, "P2")]
