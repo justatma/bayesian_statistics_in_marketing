@@ -181,7 +181,58 @@ def _pointer(s: pipeline.RunSnapshot) -> dict[str, Any]:
     }
 
 
-def _posterior_entry(s: pipeline.RunSnapshot, variant: str) -> dict[str, Any]:
+def _fit_route(s: pipeline.RunSnapshot) -> dict[str, Any]:
+    """S39 (9): the route that produced the state. ``try`` is null until J8 records it."""
+    return {"kind": s.route.kind, "step": s.configuration.get("fit_step"), "try": None}
+
+
+def _held_of(s: pipeline.RunSnapshot) -> tuple[dict | None, str | None]:
+    """S39 (8): the run's held statuses, or None and the reason. An unsaved snapshot (its run not
+    in the run record) and any raise of ``held_status`` give None."""
+    from bayesian_marketing.claims.held import held_status
+
+    try:
+        held = held_status(s.run_id)
+    except Exception as exc:
+        return None, f"held status not available: {type(exc).__name__}: {exc}"
+    if held is None:
+        return None, "held status not available"
+    return held, None
+
+
+def _held_fields(
+    s: pipeline.RunSnapshot,
+    ad: str,
+    name: str,
+    raw: str,
+    reasons: list[str],
+    held: tuple[dict | None, str | None],
+) -> dict[str, Any]:
+    """S39 (8), (9): ``held_status`` beside the raw ``status`` (``held_status_reason`` when it is
+    null), the held line in ``status_reasons`` when held is below raw, and ``fit_route``."""
+    from bayesian_marketing.claims import held as H
+
+    got, why = held
+    value: str | None = None
+    if got is not None:
+        k = H.quantity_key(
+            "ad", ad, name, H.run_kind(s.conversion_kind, s.synthetic, s.client_id), s.metric
+        )
+        value = H.lookup(got, k)
+        if value is None:
+            why = f"held status not available: no held status for {name} of ad {ad}"
+    out: dict[str, Any] = {"held_status": value, "fit_route": _fit_route(s)}
+    if value is None:
+        out["held_status_reason"] = why
+    elif H.rank(value) < H.rank(raw):
+        reasons = [*reasons, H.HELD_REASON.format(held=value, raw=raw)]
+    out["status_reasons"] = reasons
+    return out
+
+
+def _posterior_entry(
+    s: pipeline.RunSnapshot, variant: str, held: tuple[dict | None, str | None] = (None, None)
+) -> dict[str, Any]:
     ad = s.variants[variant]
     name = pipeline.metric_quantity(s.metric)
     q = next(
@@ -199,20 +250,20 @@ def _posterior_entry(s: pipeline.RunSnapshot, variant: str) -> dict[str, Any]:
         return entry | {
             "quantity_id": None,
             "status": "below_floor",
-            "status_reasons": [reason],
             "summary": None,
             "evidence_class": None,
             "inventory_class": None,
             "design": None,
             "notices": [reason],
             "published": False,
+            **_held_fields(s, ad, name, "below_floor", [reason], held),
         }
     return entry | {
         "quantity_id": q.quantity_id,
         "summary": dict(q.estimate.summary),
         "status": q.feasibility.status,
         "status_basis": q.feasibility.basis,
-        "status_reasons": list(q.feasibility.reasons),
+        **_held_fields(s, ad, name, q.feasibility.status, list(q.feasibility.reasons), held),
         "evidence_class": q.evidence_class,
         "inventory_class": inventory_class(q.evidence_class, q.design, q.provenance.synthetic),
         "design": q.design,
@@ -225,7 +276,9 @@ def _posterior_entry(s: pipeline.RunSnapshot, variant: str) -> dict[str, Any]:
 
 
 def result_of(s: pipeline.RunSnapshot) -> dict:
-    """§11.2 mapping from a run snapshot."""
+    """§11.2 mapping from a run snapshot. Each posterior entry carries the raw ``status`` and,
+    beside it, the held one (J7, S39 (8), (9))."""
+    held = _held_of(s)
     ad_to_variant = {ad: v for v, ad in s.variants.items()}
     c = s.comparison
     p_best: dict[str, float] = {}
@@ -285,7 +338,7 @@ def result_of(s: pipeline.RunSnapshot) -> dict:
         "synthetic": s.synthetic,
     }
     out = {
-        "posterior": {v: _posterior_entry(s, v) for v in s.variants},
+        "posterior": {v: _posterior_entry(s, v, held) for v in s.variants},
         "probability_best": p_best,
         "expected_loss": loss,
         "uncertainty": uncertainty,

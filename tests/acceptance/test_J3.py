@@ -89,7 +89,8 @@ def _assert_run_marker(env: J2Env, run_id: str, path: Path) -> dict[str, Any]:
     assert canonical_marker(data)  # S33: canonical, one trailing line feed
     assert data.endswith(b"\n") and not data.endswith(b"\n\n")
     m = _load(path)
-    assert set(m) == ENGINE_RUN_FIELDS  # exactly the J3 table's fields
+    # J3's fields exactly, plus J7's timezone and fit_route (S41 (2))
+    assert set(m) == ENGINE_RUN_FIELDS | {"timezone", "fit_route"}
     snap_file = env.snapshot_file(run_id)
     snap = env.snapshot(run_id)
     assert m["kind"] == "engine_run"

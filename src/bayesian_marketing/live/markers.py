@@ -60,8 +60,22 @@ def engine_run_marker(run_id: str) -> Path:
             "rows_sha256": rows_sha256,
             "row_keys": row_keys,
             "written_at": _now(),
+            # J7 (8), S39 (9), (11): read from the snapshot; null on a run saved before J7
+            "timezone": snap.get("timezone"),
+            "fit_route": fit_route(snap),
         },
     )
+
+
+def fit_route(snap: dict[str, Any]) -> dict[str, Any]:
+    """S39 (9): ``{"kind", "step", "try"}`` from a snapshot's JSON. ``try`` stays null until J8
+    records ``fit_attempts``."""
+    route = snap.get("route") or {}
+    return {
+        "kind": route.get("kind"),
+        "step": (snap.get("configuration") or {}).get("fit_step"),
+        "try": None,
+    }
 
 
 def notebook_release_marker(folder: Path, release_hash: str) -> Path:

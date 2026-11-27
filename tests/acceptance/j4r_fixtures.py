@@ -56,6 +56,33 @@ def date_slot(value: str) -> str:
     return "{date:" + value + "}"
 
 
+def raw_held(run_id: str) -> dict:
+    """A ``load_held`` that gives every quantity and the decision its raw status, read from the
+    saved snapshot in ``data_dir()``. J7 (S39 (2), (10)) makes the renderer's default the held
+    status, which starts at below_floor and rises only after a day of runs, so a J4R case built on
+    one run would render "not knowable yet" everywhere. These cases test rendering, not holding."""
+    from bayesian_marketing.claims import held as H
+
+    s = pipeline.load_snapshot(run_id)
+    kind = H.run_kind(s.conversion_kind, s.synthetic, s.client_id)
+    out: dict = {
+        H.quantity_key(q.scope.level, q.scope.ids.get(q.scope.level), q.name, kind, s.metric): (
+            q.feasibility.status
+        )
+        for q in s.quantities
+    }
+    if s.decision is not None:
+        out[H.decision_key(kind, s.metric)] = s.decision.status
+    return out
+
+
+def hold_raw(monkeypatch: Any) -> None:
+    """Make ``raw_held`` the renderer's default ``load_held`` for one test (J7, see above)."""
+    from bayesian_marketing.claims import slots
+
+    monkeypatch.setattr(slots, "_default_load_held", raw_held)
+
+
 def slot_of_token(token: str, form: str | None = None) -> str:
     """A menu item's token as a slot to write, with a form if given. The token is "the slot as
     the persona writes it, without #claim_id and without a form"; it is taken with its braces,
