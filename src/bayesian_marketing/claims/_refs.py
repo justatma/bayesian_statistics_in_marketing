@@ -286,13 +286,33 @@ def release_is_newest(release_id: str, catalog: dict[str, Any]) -> bool:
 def default_load_parents(client_id: str) -> dict[str, str]:
     """J4R.2 (3): the live store, opened read only: ad id to ad set id from each ad's newest row.
     No store on this machine means no parents, not a failure."""
-    raise NotImplementedError
+    path = _live_store_path()
+    if path is None:
+        return {}
+    con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "SELECT r.entity_ids_json FROM rows r "
+            "JOIN polls p ON p.poll_id = r.poll_id WHERE r.client_id = ? "
+            "ORDER BY p.started_at, r.date",
+            (client_id,),
+        ).fetchall()
+    finally:
+        con.close()
+    parents: dict[str, str] = {}
+    for (ids_json,) in rows:
+        ids = json.loads(ids_json)
+        if ids.get("ad") and ids.get("ad_set"):
+            parents[str(ids["ad"])] = str(ids["ad_set"])
+    return parents
 
 
 def default_load_display_names(client_id: str) -> dict[str, str]:
     """J4R.2 (9): the client config's ``display_names``, the client resolved as ``resolve_client``
     does (the AtmaOS id alias included). Raises when the config can't be loaded."""
-    raise NotImplementedError
+    from bayesian_marketing.live import config as live_config
+
+    return dict(live_config.load_client(resolve_client(client_id)).display_names)
 
 
 # --- names (S16) -----------------------------------------------------------------------------
@@ -392,3 +412,118 @@ def day_of(value: Any) -> date | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
     except (TypeError, ValueError):
         return None
+
+
+# --- ads that share a name (J4R.2) -----------------------------------------------------------
+
+_TRAILING_RE = re.compile(r"[\s.!?,;:]+$")
+
+
+def strip_trailing(s: str) -> str:
+    """J4R.2 (5): a name part less any trailing run of whitespace and ``. ! ? , ; :``."""
+    return _TRAILING_RE.sub("", s)
+
+
+def bare_names(layers: list[dict[str, str]]) -> dict[str, str]:
+    """J4R.2 (1): each id's name from the highest layer that names it (S16's order)."""
+    bare: dict[str, str] = {}
+    for layer in layers:
+        for eid, name in layer.items():
+            bare.setdefault(str(eid), str(name))
+    return bare
+
+
+def shared_name_candidates(bare: dict[str, str]) -> set[str]:
+    """J4R.2 (2): every id whose bare name, under ``norm_name``, another id's bare name shares."""
+    by_name: dict[str, set[str]] = {}
+    for eid, name in bare.items():
+        by_name.setdefault(norm_name(name), set()).add(eid)
+    return {eid for ids in by_name.values() if len(ids) > 1 for eid in ids}
+
+
+def release_parents(sources: list[Any]) -> dict[str, str]:
+    """J4R.2 (3): ad id to ``content.adset_id`` from a release's ``meta_object`` sources whose
+    ``ref.object_type`` is "ad"."""
+    out: dict[str, str] = {}
+    for s in sources:
+        if not isinstance(s, dict) or s.get("kind") != "meta_object":
+            continue
+        sref, content = s.get("ref") or {}, s.get("content") or {}
+        if not isinstance(sref, dict) or not isinstance(content, dict):
+            continue
+        if sref.get("object_type") != "ad":
+            continue
+        oid = sref.get("object_id") or content.get("id")
+        if oid and content.get("adset_id"):
+            out.setdefault(str(oid), str(content["adset_id"]))
+    return out
+
+
+#: J4R.2 (3), (9): the levels that are never an ad set.
+_NOT_AN_AD_SET = frozenset({"ad", "campaign"})
+
+
+def qualify_names(
+    merged: dict[str, str],
+    bare: dict[str, str],
+    candidates: set[str],
+    types: dict[str, set[str]],
+    parent_layers: list[dict[str, str]],
+    display: dict[str, str] | None,
+    states_a_figure: Any,
+) -> tuple[dict[str, str], list[str]]:
+    """J4R.2 rules 2 to 6, all at once. ``merged`` is ``merge_names``' output, ``parent_layers``
+    the parent layers highest first, ``display`` the client's ``display_names`` (None when they
+    cannot be read: nothing is qualified). ``states_a_figure`` is the display-name rule. Returns
+    the final names and the reasons for aliases ignored."""
+    reasons: list[str] = []
+    final = {eid: name for eid, name in merged.items() if eid not in candidates}  # rule 2
+    aliases: dict[str, str] = {}
+    for key, value in (display or {}).items():
+        if types.get(key, set()) & _NOT_AN_AD_SET:  # rule 9
+            level = ", ".join(sorted(types[key]))
+            reasons.append(f"display_names: {key} is named as {level}, not an ad set; ignored")
+            continue
+        why = states_a_figure(value)
+        if why is not None:
+            reasons.append(f"display_names: {key} ignored: {why}")
+            continue
+        aliases[key] = value
+
+    def ad_set_name(adset: str) -> str | None:  # rule 4
+        if adset in aliases:
+            return aliases[adset]
+        name = final.get(adset)
+        if name is None or states_a_figure(name) is not None:
+            return None
+        return name
+
+    qualified: dict[str, str] = {}
+    if display is not None:
+        for eid in sorted(candidates):
+            if types.get(eid, set()) & {"ad_set", "campaign"}:  # rule 3: ads only (S38 (4))
+                continue
+            parent = next(
+                (
+                    layer[eid]
+                    for layer in parent_layers
+                    if layer.get(eid) and not (types.get(layer[eid], set()) & _NOT_AN_AD_SET)
+                ),
+                None,
+            )  # S38 (3): a parent typed ad or campaign is refused for its layer
+            if parent is None:
+                continue
+            shown = ad_set_name(parent)
+            if shown is None:
+                continue
+            head, tail = strip_trailing(bare[eid]), strip_trailing(shown)
+            if head and tail:
+                qualified[eid] = f"{head} ({tail})"  # rule 5
+
+    by_name: dict[str, list[str]] = {}  # rule 6
+    for eid, name in [*final.items(), *qualified.items()]:
+        by_name.setdefault(norm_name(name), []).append(eid)
+    for eid, name in qualified.items():
+        if len(by_name[norm_name(name)]) == 1:
+            final[eid] = name
+    return final, reasons

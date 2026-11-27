@@ -655,6 +655,8 @@ class _Ctx:
     _kind: str | None = None
     _kind_read: bool = False
     names_reasons: list[str] = field(default_factory=list)
+    #: S38 (2): reasons from ``load_parents`` and ``load_display_names``, for the menu only
+    qualify_reasons: list[str] = field(default_factory=list)
 
     def _run_kind(self, snap: Any) -> str:
         """R9: the snapshot's own kind; for one saved before J5, the config's, then "lead" if
@@ -733,15 +735,20 @@ class _Ctx:
     def names(self) -> _Names:
         """R13, R14 (S16's order): the newest run's snapshot, then every release's sources, then
         the store, always all three, so a slot renders the same whatever else is in the text
-        (S26 (1)). The menu and the render both call this."""
+        (S26 (1)). The menu and the render both call this. J4R.2: ads that share a name are
+        named by their ad set (rules 1 to 7); the parent and display-name loaders are called
+        only when some id shares its name."""
         if self._names is not None:
             return self._names
         types: dict[str, set[str]] = {}
         layers: list[dict[str, str]] = []
         _, run = self.newest_run()
         snap_names: dict[str, str] = {}
+        parent_layers: list[dict[str, str]] = []
         if isinstance(run, _Run) and run.snap.client_id == self.client_id:
             snap_names = {str(k): str(v) for k, v in run.snap.entity_names.items()}
+            parents = getattr(run.snap, "entity_parents", None) or {}
+            parent_layers.append({str(k): str(v) for k, v in parents.items()})
             for ad in run.snap.variants.values():
                 types.setdefault(str(ad), set()).add("ad")
             for q in run.snap.quantities:
@@ -750,6 +757,7 @@ class _Ctx:
                     types.setdefault(str(q.scope.ids[level]), set()).add(level)
         layers.append(snap_names)
         nb: dict[str, str] = {}
+        release_parents: list[dict[str, str]] = []
         for rid in R.client_release_ids(self.client_id):
             rel = self.release(rid)
             if not isinstance(rel, _Release) or rel.client != self.client_id:
@@ -758,7 +766,9 @@ class _Ctx:
                 nb.setdefault(oid, name)
                 if level is not None:
                     types.setdefault(oid, set()).add(level)
+            release_parents.append(R.release_parents(rel.sources))
         layers.append(nb)
+        parent_layers += reversed(release_parents)  # J4R.2 (3): the releases newest first
         try:
             got = self.load_names(self.client_id)
             layers.append({str(k): str(v) for k, v in dict(got).items()})
@@ -766,7 +776,31 @@ class _Ctx:
             self.names_reasons.append(
                 f"names for {self.client_id}: cannot be read ({type(exc).__name__}: {exc})"
             )
-        self._names = _Names(R.merge_names(layers), types)
+        merged = R.merge_names(layers)
+        bare = R.bare_names(layers)
+        candidates = R.shared_name_candidates(bare)
+        if candidates:
+            try:
+                got = self.load_parents(self.client_id)
+                parent_layers.append({str(k): str(v) for k, v in dict(got).items()})
+            except Exception as exc:  # J4R.2 (3): the layer is skipped
+                self.qualify_reasons.append(
+                    f"ad sets for {self.client_id}: cannot be read ({type(exc).__name__}: {exc})"
+                )
+            display: dict[str, str] | None = None
+            try:
+                got = self.load_display_names(self.client_id)
+                display = {str(k): str(v) for k, v in dict(got).items()}
+            except Exception as exc:  # J4R.2 (9): nothing is qualified
+                self.qualify_reasons.append(
+                    f"display names for {self.client_id}: cannot be read "
+                    f"({type(exc).__name__}: {exc}); no shared name is qualified"
+                )
+            merged, why = R.qualify_names(
+                merged, bare, candidates, types, parent_layers, display, _name_states_a_figure
+            )
+            self.qualify_reasons += why
+        self._names = _Names(merged, types)
         return self._names
 
 
@@ -1454,7 +1488,7 @@ def client_slots(
         ads = list(dict.fromkeys(ad_ids))
     fig_slots = [s for s in candidates if s.kind is not None]
     names = ctx.names()
-    reasons += ctx.names_reasons
+    reasons += ctx.names_reasons + ctx.qualify_reasons  # S38 (2): the menu's reasons only
     for s in fig_slots:
         try:
             out = _render_slot(s, ctx, names)

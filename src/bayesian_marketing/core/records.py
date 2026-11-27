@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from bayesian_marketing.core.base import Frozen, Platform
 from bayesian_marketing.core.decisions import ClientEconomics, Comparison, Horizon, Recommendation
@@ -95,8 +95,22 @@ class ClientConfig(Frozen):
     priors: dict[str, str] = Field(default_factory=dict)
     # J4R.1: AtmaOS's id for the client, so a caller holding only that id finds this config.
     atmaos_client_id: str | None = None
-    # J4R.2 (8): platform id to a display name, held to the display-name rule on load (to build)
+    # J4R.2 (8): platform id to a display name, held to the display-name rule on load. Keys are
+    # quoted strings in YAML; an unquoted id is an int and fails the str key.
     display_names: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("display_names")
+    @classmethod
+    def _display_names_state_no_figure(cls, v: dict[str, str]) -> dict[str, str]:
+        """J4R.2 (8): each value held to the rule labels are held to in format 1.2.0, through
+        the function ``notebook/release.py`` uses, imported lazily as release.py does."""
+        from bayesian_marketing.claims.slots import _name_states_a_figure
+
+        for key, name in v.items():
+            why = _name_states_a_figure(name)
+            if why is not None:
+                raise ValueError(f"display_names[{key!r}] refused: {why}")
+        return v
 
 
 class NarrativeBlock(Frozen):

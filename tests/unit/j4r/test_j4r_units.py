@@ -675,8 +675,17 @@ def test_R29_a_cmp_slot_names_its_leader_for_the_lint(env: J4REnv) -> None:
 def test_S26_1_every_menu_slot_renders_the_same_alone_and_beside_every_other(
     env: J4REnv,
 ) -> None:
-    """S26 (1), R13, R14: same slot, same text, byte for byte."""
+    """S26 (1), R13, R14: same slot, same text, byte for byte.
+
+    Amended for J4R.2 (check (b)): the colliding store name makes IMG3 a candidate under rule 2,
+    so IMG3 is given an ad set and renders "IMG3_TXT1 (Set A)" in every slot."""
     run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    env._patch(
+        run,
+        lambda d: d.update(
+            entity_names={**d["entity_names"], "sA": "Set A"}, entity_parents={IMG3_ID: "sA"}
+        ),
+    )
     env.ctr_44(run)
     env.set_p_best(run, {IMG3_ID: 0.621, IMG2_ID: 0.379})
     env.store_names = {"999": IMG3.lower()}  # a colliding store name, ranked below the snapshot

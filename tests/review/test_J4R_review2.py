@@ -265,7 +265,6 @@ def test_J4R_review2_p_best_as_a_ratio_unit_shows_certainty(env: J4REnv, run: st
     assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
 
 
-
 def test_J4R_review2_p_best_in_percent_unit_shows_certainty(env: J4REnv, run: str) -> None:
     """A notebook p_best of 99.96 with unit "percent" renders "100.0%"."""
     rel = nb_one(env, {"name": "p_best", "value": 99.96, "unit": "percent"})
@@ -274,7 +273,6 @@ def test_J4R_review2_p_best_in_percent_unit_shows_certainty(env: J4REnv, run: st
     # fails rather than rendering. The account is a subject that is stated, never a default.
     assert refused(res), repr(res["text"])
     assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
-
 
 
 def test_J4R_review2_negative_amount_that_rounds_to_zero_shows_minus_zero(
@@ -289,7 +287,6 @@ def test_J4R_review2_negative_amount_that_rounds_to_zero_shows_minus_zero(
     assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
 
 
-
 def test_J4R_review2_negative_ratio_that_rounds_to_zero_shows_minus_zero(
     env: J4REnv, run: str
 ) -> None:
@@ -300,7 +297,6 @@ def test_J4R_review2_negative_ratio_that_rounds_to_zero_shows_minus_zero(
     # fails rather than rendering. The account is a subject that is stated, never a default.
     assert refused(res), repr(res["text"])
     assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
-
 
 
 @pytest.mark.parametrize("value", [0.4, 1.4, 1.5])
@@ -463,13 +459,16 @@ def test_J4R_review2_a_release_whose_catalog_names_another_client_than_its_id_re
     assert refused(res), repr(res["text"])
 
 
-def test_J4R_review2_menu_and_render_differ_when_another_ads_name_collides_in_the_store(
+def test_J4R_review2_menu_and_render_agree_when_another_ads_name_collides_in_the_store(
     env: J4REnv, run: str
 ) -> None:
-    """The menu reads the store (an ad of the run is unnamed), where the name of a second ad
-    equals IMG3's, and drops both names; a render of the same slot alone does not read the
-    store and keeps IMG3's. Same slot, two renderings."""
-    env.set_names(run, {IMG3_ID: IMG3})
+    """The store gives a second ad IMG3's name. The review found the menu and a render of the
+    same slot alone disagreed on IMG3's name (S26 (1)); they must agree.
+
+    Amended for J4R.2 (check (b)): the store's name makes both ads candidates under rule 2, so
+    each is given an ad set, and IMG3 renders "IMG3_TXT1 (Set A)" on the menu and alone."""
+    env.set_names(run, {IMG3_ID: IMG3, "sA": "Set A", "sB": "Set B"})
+    env._patch(run, lambda d: d.update(entity_parents={IMG3_ID: "sA", IMG2_ID: "sB"}))
     env.store_names = {IMG2_ID: IMG3.lower()}
     qid = env.qid(run, IMG3_ID, "ctr")
     items = {i["token"]: i for i in env.menu()["slots"]}
@@ -479,13 +478,16 @@ def test_J4R_review2_menu_and_render_differ_when_another_ads_name_collides_in_th
     assert res["text"] == item["forms"]["start"], (res["text"], item["forms"]["start"])
 
 
-def test_J4R_review2_same_slot_renders_differently_with_another_slot_beside_it(
+def test_J4R_review2_same_slot_renders_the_same_with_another_slot_beside_it(
     env: J4REnv, run: str
 ) -> None:
-    """The ctr slot of IMG3 renders "IMG3_TXT1's ..." alone and "Ad 1202...'s ..." when a name
-    slot of the other ad is in the text, because the names layers depend on what else is
-    needed."""
-    env.set_names(run, {IMG3_ID: IMG3})
+    """The review found IMG3's ctr slot rendered "IMG3_TXT1's ..." alone and "Ad 1202...'s ..."
+    beside a name slot of the other ad (S26 (1)); it must render the same either way.
+
+    Amended for J4R.2 (check (b)): the store's name makes both ads candidates under rule 2, so
+    each is given an ad set, and IMG3 renders "IMG3_TXT1 (Set A)" alone and beside the other."""
+    env.set_names(run, {IMG3_ID: IMG3, "sA": "Set A", "sB": "Set B"})
+    env._patch(run, lambda d: d.update(entity_parents={IMG3_ID: "sA", IMG2_ID: "sB"}))
     env.store_names = {IMG2_ID: IMG3.lower()}
     qid = env.qid(run, IMG3_ID, "ctr")
     alone = env.render(fig_run(run, qid, "start"))

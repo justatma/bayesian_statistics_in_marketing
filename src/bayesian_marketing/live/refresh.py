@@ -108,6 +108,7 @@ def _outcome(
                 manifest_dir=config_root,
                 pulls=[pull],
                 entity_names=_entity_names(rows),
+                entity_parents=_entity_parents(rows),
                 extra_dataset_hashes=[live_rows.HASH_PREFIX + sha],
                 row_keys=row_keys,
                 rows_form=live_rows.ROWS_FORM,
@@ -138,6 +139,17 @@ def _entity_names(rows: list[LiveRow]) -> dict[str, str]:
             if eid and name:
                 names[str(eid)] = str(name)
     return names
+
+
+def _entity_parents(rows: list[LiveRow]) -> dict[str, str]:
+    """J4R.2 (10): ad id -> ad set id as the pull read them, the latest day's when an ad moved
+    within the pull."""
+    parents: dict[str, str] = {}
+    for r in sorted(rows, key=lambda r: r.date):
+        ad, adset = r.entity_ids.get("ad"), r.entity_ids.get("ad_set")
+        if ad and adset:
+            parents[str(ad)] = str(adset)
+    return parents
 
 
 def _conversion_kind(config: ClientConfig) -> str:
