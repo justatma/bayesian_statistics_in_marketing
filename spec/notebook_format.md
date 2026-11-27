@@ -1,4 +1,4 @@
-# Account notebook format, version bayes-notebook-1.0.0
+# Account notebook format, version bayes-notebook-1.1.0
 
 26 November 2026, Bayesian Engineer. The notebook is how what this seat knows about a client's account, beyond the engine's runs, reaches AtmaOS. It covers the account's history, what the tests showed, and what stands in the way. AtmaOS's importer reads it as claims (producer kind `bayesian`, the engine as speaker), the same way the Boswell importer reads a lean release. Owner rulings: D54 here; D676 and D677 in AtmaOS.
 
@@ -10,7 +10,7 @@
 
 | File | What it holds |
 |---|---|
-| `catalog.json` | One object: `schema` ("bayes-notebook-1.0.0"), `release_id`, `parent_release_id` (or null), `client_id`, `created_at` (UTC ISO 8601), `engine_version`, `engine_commit` (full SHA), `n_entries`, `n_sources`. |
+| `catalog.json` | One object: `schema` ("bayes-notebook-1.1.0"; a 1.0.0 release still verifies), `release_id`, `parent_release_id` (or null), `client_id`, `created_at` (UTC ISO 8601), `engine_version`, `engine_commit` (full SHA), `n_entries`, `n_sources`. |
 | `entries.jsonl` | One entry per line (fields below). Every entry still standing is repeated in each release; an entry left out of a release is withdrawn. |
 | `sources.jsonl` | One copied source per line (fields below). Every source an entry cites is copied here, so each pointer can be checked without reaching this machine's live store. |
 | `integrity.json` | `{"algorithm": "sha256", "files": {"<name>": "<hex>"}, "release_hash": "<hex>"}`. It lists every other file in the folder and nothing else. `release_hash` follows Boswell's rule: sha256 over `"<name> <digest>\n"` for each file, sorted by name. |
@@ -26,7 +26,7 @@
 | `date` | ISO date | The day the fact is about, in the client's time zone (from `configs/<client_id>.yaml`). |
 | `date_end` | ISO date or null | The end of a period, for a fact that spans one. |
 | `as_of` | UTC ISO 8601 | When the fact was last checked against its sources. |
-| `quantities` | list | Optional. Each is `{name, value, unit}`. An estimated quantity adds `p05`, `p50`, `p95` and `level` (0.9), the same reading as spec 42 FR7.2's `claim_quantities`. |
+| `quantities` | list | Optional. Each is `{name, value, unit}`. An estimated quantity adds `p05`, `p50`, `p95` and `level` (0.9), the same reading as spec 42 FR7.2's `claim_quantities`. A quantity may carry `subject`, `{"level", "id"}`, where `level` is `account`, `campaign`, `ad_set` or `ad` and `id` is the platform id (1.1.0; `id` may be left out only for the account). Without it the subject is the account. The renderer names the quantity by its subject and never reads it from the statement (J4R, S25 (7)). The unit is one of an ISO 4217 code, `count`, `ratio` or `probability` (fractions), `percent` (already in percent) or `days`; any other unit cannot be rendered (S25 (6)). |
 | `basis` | list, at least one | Each is `{source_id, role}`, where `role` is `primary` or `context`. Each `source_id` must be in this release's `sources.jsonl`. |
 | `supersedes` | string or null | The `entry_id` this entry corrects, when it changes what an earlier entry said. |
 | `tags` | list of strings | Free, for search: `creative_test`, `learning_reset`, `spending_limit`, and the like. |

@@ -177,6 +177,85 @@ ISO_4217: frozenset[str] = frozenset(_ISO_4217_TEXT.split())
 #: The caveat inside a marginal form (the forms table; S24 (6) for cmp).
 ROUGH = "still a rough estimate"
 
+#: S25 (1): the reason for a character outside the allowed set, and the set itself.
+R_CHARACTER = "a character outside the allowed set"
+ALLOWED_PUNCTUATION = ".,;:!?'\"()-/&\u2019\u2018\u201c\u201d\u2013\u2014\u2026"
+ALLOWED_CHARACTERS: frozenset[str] = frozenset(
+    [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    + [chr(c) for c in range(ord("a"), ord("z") + 1)]
+    + [chr(c) for c in range(0x00C0, 0x0180) if c not in (0x00D7, 0x00F7)]
+    + [" ", "\n"]
+    + list(ALLOWED_PUNCTUATION)
+)
+#: S25 (9): a display name may also hold digits and underscores ("IMG3_TXT1"), inside its slot only.
+NAME_EXTRA_CHARACTERS: frozenset[str] = frozenset("0123456789_")
+R_NAME_FIGURE = "a name that states a figure"
+#: S25 (6).
+R_UNIT = "unit not renderable"
+#: S25 (8).
+R_KIND_UNKNOWN = "the account's conversion kind cannot be read, so the label cannot be chosen"
+
+#: S25 (4): the words the list gains. English first, then the numbers zero to twenty, hundred and
+#: thousand in Spanish, French, German, Italian and Portuguese, less "due", "seize", "elf", "un",
+#: "une", "una" and "sept", which are common English words.
+QUANTITY_WORDS_S25: tuple[str, ...] = (
+    "nought",
+    "naught",
+    "nil",
+    "once",
+    "dual",
+    "duo",
+    "trio",
+    "quartet",
+    "pair",
+    "pairs",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+    "twentieth",
+    "hundredth",
+    "thousandth",
+    "millionth",
+    "trillion",
+    "quadrillion",
+    "zillion",
+    "jillion",
+    "gazillion",
+    "bazillion",
+    "umpteen",
+    "lakh",
+    "crore",
+)
+_FOREIGN_TEXT = """
+    cero uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece catorce quince
+    dieciseis dieciséis diecisiete dieciocho diecinueve veinte cien ciento mil
+    zéro deux trois quatre cinq six huit neuf dix onze douze treize quatorze quinze vingt cent
+    mille
+    null eins zwei drei vier fünf funf sechs sieben acht neun zehn zwölf zwolf dreizehn vierzehn
+    fünfzehn sechzehn siebzehn achtzehn neunzehn zwanzig hundert tausend
+    zero tre quattro cinque sei sette otto nove dieci undici dodici tredici quattordici quindici
+    sedici diciassette diciotto diciannove venti cento
+    um dois duas três quatro cinco seis sete oito dez onze doze treze catorze quinze dezesseis
+    dezasseis dezessete dezassete dezoito dezenove dezanove vinte cem
+"""
+FOREIGN_NUMBER_WORDS: tuple[str, ...] = tuple(_FOREIGN_TEXT.split())
+
 # --- the numeral rule's word forms -----------------------------------------------------------
 
 _NUMBER_WORDS = QUANTITY_WORDS[: QUANTITY_WORDS.index("billion") + 1]
@@ -253,8 +332,9 @@ _OTHER_FORMS = (
 
 
 def quantity_word_forms() -> frozenset[str]:
-    """Every word form the numeral rule refuses, from ``QUANTITY_WORDS``."""
-    out = set(QUANTITY_WORDS) | set(_OTHER_FORMS)
+    """Every word form the numeral rule refuses, from ``QUANTITY_WORDS`` and S25 (4)."""
+    out = set(QUANTITY_WORDS) | set(_OTHER_FORMS) | set(QUANTITY_WORDS_S25)
+    out |= {unicodedata.normalize("NFKC", w).casefold() for w in FOREIGN_NUMBER_WORDS}
     for w in _NUMBER_WORDS:
         out.add(_PLURAL.get(w, w + "s"))
         if w not in ("zero", "one"):
@@ -262,6 +342,9 @@ def quantity_word_forms() -> frozenset[str]:
         if w in _ORDINAL:
             out.add(_ORDINAL[w])
             out.add(_ORDINAL[w] + "s")
+    for w in ("trillion", "quadrillion", "zillion", "jillion", "gazillion", "bazillion"):
+        out |= {w + "s", w + "th"}
+    out |= {"lakhs", "crores", "umpteenth", "duos", "trios", "quartets"}
     return frozenset(out)
 
 
@@ -269,7 +352,10 @@ _FORMS = quantity_word_forms()
 _PERCENT_SINGLE = {"percent", "percents", "pct", "percentage", "percentages"}
 _PERCENT_PHRASES = tuple(p for p in PERCENT_WORDS if " " in p)
 _WORD_RE = re.compile(r"[^\W_]+")
-_CATEGORIES = ("Nd", "No", "Nl", "Sc")
+#: S25 (2): two or more letters forming a valid Roman numeral.
+_ROMAN_RE = re.compile(r"M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})")
+#: S25 (3): the words a token may be glued from.
+_GLUE_WORDS = frozenset([*_NUMBER_WORDS, "trillion"])
 
 
 def _phrase_hit(tokens: list[str], phrase: str) -> bool:
@@ -283,37 +369,82 @@ def _phrase_hit(tokens: list[str], phrase: str) -> bool:
     return False
 
 
-def _numeral_hits(text: str) -> list[str]:
-    """The numeral rule on the text with the slots removed: the words and characters it refuses,
-    in order, each once. Categories on the raw text (S24 (2)); signs and codes after NFKC and Cf
-    stripping; words after casefolding too (A3)."""
+def _roman(token: str) -> bool:
+    """S25 (2): in either case, upper or lower; "I" alone is a word."""
+    if len(token) < 2 or not (token.isupper() or token.islower()):
+        return False
+    return _ROMAN_RE.fullmatch(token.upper()) is not None
+
+
+def _glued(token: str) -> bool:
+    """S25 (3): the token splits wholly into two or more number words."""
+    n = len(token)
+    best = [0] + [-1] * n  # the most words a prefix splits into; -1: no split
+    for end in range(1, n + 1):
+        for start in range(end):
+            if best[start] >= 0 and token[start:end] in _GLUE_WORDS:
+                best[end] = max(best[end], best[start] + 1)
+    return best[n] >= 2
+
+
+def _char_reason(ch: str) -> str:
+    shown = f" {ch}" if ch.isprintable() and not ch.isspace() else ""
+    return f"U+{ord(ch):04X}{shown}"
+
+
+def _word_hits(text: str) -> list[str]:
+    """The word half of the numeral rule (A3, S24 (3), S25 (2) to (4)): ISO codes in upper case,
+    then whole words after NFKC and casefolding. Each Cf character is read both as removed and as
+    a word break, so neither reading lets a word through; S25 (1) refuses the character too."""
     hits: list[str] = []
 
     def add(x: str) -> None:
         if x not in hits:
             hits.append(x)
 
-    for ch in text:
-        if unicodedata.category(ch) in _CATEGORIES:
-            add(ch)
-    nf = "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
-    for ch in nf:
-        if unicodedata.category(ch) in _CATEGORIES:
-            add(ch)
-    for sign in PERCENT_SIGNS:
-        if sign in nf or sign in text:
-            add(sign)
-    for m in _WORD_RE.finditer(nf):
-        if m.group(0) in ISO_4217:  # case-sensitive: upper case only
-            add(m.group(0))
-    tokens = _WORD_RE.findall(nf.casefold())
-    for t in tokens:
-        if t in _FORMS or t in _PERCENT_SINGLE:
-            add(t)
-    for phrase in (*QUANTITY_PHRASES, *_PERCENT_PHRASES):
-        if _phrase_hit(tokens, phrase):
-            add(phrase)
+    nf = unicodedata.normalize("NFKC", text)
+    joined = "".join(c for c in nf if unicodedata.category(c) != "Cf")
+    broken = "".join(" " if unicodedata.category(c) == "Cf" else c for c in nf)
+    for variant in (joined, broken):
+        for m in _WORD_RE.finditer(variant):
+            tok = m.group(0)
+            if tok in ISO_4217:  # case-sensitive: upper case only
+                add(tok)
+            if _roman(tok):
+                add(tok)
+        tokens = _WORD_RE.findall(variant.casefold())
+        for t in tokens:
+            if t in _FORMS or t in _PERCENT_SINGLE or _glued(t):
+                add(t)
+        for phrase in (*QUANTITY_PHRASES, *_PERCENT_PHRASES):
+            if _phrase_hit(tokens, phrase):
+                add(phrase)
     return hits
+
+
+def _numeral_reasons(text: str) -> list[str]:
+    """The numeral rule on the text with the slots removed, one reason per thing refused, each
+    quoting it (A6): every character outside the allowed set by code point (S25 (1), on the raw
+    text, before NFKC), then the words."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for ch in text:
+        if ch not in ALLOWED_CHARACTERS and ch not in seen:
+            seen.add(ch)
+            out.append(f"{R_FIGURE_OUTSIDE_SLOT}: {R_CHARACTER}: {_char_reason(ch)}")
+    out += [f"{R_FIGURE_OUTSIDE_SLOT}: {w!r}" for w in _word_hits(text)]
+    return out
+
+
+def _name_states_a_figure(name: str) -> str | None:
+    """S25 (9): why a display name cannot be rendered, or None."""
+    bad = [c for c in name if c not in ALLOWED_CHARACTERS and c not in NAME_EXTRA_CHARACTERS]
+    if bad:
+        return f"{R_NAME_FIGURE}: {name!r} holds {_char_reason(bad[0])}"
+    words = _word_hits(name)
+    if words:
+        return f"{R_NAME_FIGURE}: {name!r} holds {words[0]!r}"
+    return None
 
 
 # --- slots: the grammar ----------------------------------------------------------------------
@@ -421,6 +552,7 @@ class _Ctx:
     releases: dict[str, _Release | str] = field(default_factory=dict)
     _names: dict[str, str] | None = None
     _kind: str | None = None
+    _kind_read: bool = False
     names_reasons: list[str] = field(default_factory=list)
 
     def run(self, run_id: str) -> _Run | str:
@@ -459,10 +591,16 @@ class _Ctx:
         return self.releases[release_id]
 
     @property
-    def kind(self) -> str:
-        """The client's conversion kind, for a notebook figure and the lint (S6)."""
-        if self._kind is None:
-            self._kind = R.client_kind(self.client_id)
+    def kind(self) -> str | None:
+        """S25 (8): a notebook figure's conversion kind. The client's newest run's, else its
+        config's, else "lead" if any of its runs says lead; None when nothing can be read."""
+        if not self._kind_read:
+            self._kind_read = True
+            _, run = self.newest_run()
+            if isinstance(run, _Run):
+                self._kind = run.kind
+            else:
+                self._kind = R.config_kind(self.client_id) or R.kind_from_runs(self.client_id)
         return self._kind
 
     def newest_run(self) -> tuple[str | None, _Run | str | None]:
@@ -509,10 +647,73 @@ class _Ctx:
 
 # --- rendering -------------------------------------------------------------------------------
 
-_SYMBOLS = {"USD": "$", "EUR": "€", "GBP": "£"}
+#: Currency signs where one belongs to the code alone (S25 (6)); any other code follows the value.
+_SYMBOLS = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "JPY": "¥",
+    "INR": "₹",
+    "KRW": "₩",
+    "ILS": "₪",
+    "NGN": "₦",
+    "PHP": "₱",
+    "UAH": "₴",
+    "VND": "₫",
+    "TRY": "₺",
+    "RUB": "₽",
+}
 _LEVEL_WORDS = {"ad": "ad", "ad_set": "ad set", "campaign": "campaign"}
+_LEVELS = ("account", "campaign", "ad_set", "ad")
 _CMP_UNITS = {"clicks": "clicks", "orders": "orders", "leads": "sign-ups", "money": "value"}
 _NB_LABELS = {"p_best": "chance of being best"}
+#: J5: on a lead account these show at ``unit_money_decimals``.
+_LEAD_UNIT_MONEY = frozenset({"cpa", "cpc"})
+
+
+def _rounding() -> dict[str, int]:
+    return {k: int(v) for k, v in V.phrasing()["rounding"].items()}
+
+
+def _half_up(x: float | Decimal, decimals: int) -> Decimal:
+    """S25 (5): decimal ROUND_HALF_UP on the value as written, never binary half-even."""
+    d = x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+    return d.quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
+
+
+def _fixed(x: float | Decimal, decimals: int) -> str:
+    return f"{_half_up(x, decimals):,.{decimals}f}"
+
+
+def _fmt_percent(fraction: float) -> str:
+    return _fixed(Decimal(repr(float(fraction))) * 100, _rounding()["percent_decimals"]) + "%"
+
+
+def _fmt_probability(p: float) -> str:
+    """A whole percent, half up; never a claim of certainty or impossibility (S25 (5))."""
+    pct = _half_up(Decimal(repr(float(p))) * 100, 0)
+    if pct >= 100:
+        return "more than 99%"
+    if pct <= 0:
+        return "less than 1%"
+    return f"{pct}%"
+
+
+def _fmt_count(x: float) -> str:
+    return _fixed(x, 0)
+
+
+def _fmt_ratio(x: float) -> str:
+    return _fixed(x, _rounding()["probability_decimals"])
+
+
+def _money_decimals(name: str, kind: str) -> int:
+    r = _rounding()
+    return (
+        r["unit_money_decimals"]
+        if kind == "lead" and name in _LEAD_UNIT_MONEY
+        else r["money_decimals"]
+    )
 
 
 def _money(currency: str | None, shown: str) -> str:
@@ -520,13 +721,8 @@ def _money(currency: str | None, shown: str) -> str:
     if currency and currency.upper() in _SYMBOLS:
         shown = _SYMBOLS[currency.upper()] + shown
     elif currency:
-        shown = f"{shown} {currency}"
+        shown = f"{shown} {currency.upper()}"
     return ("-" if neg else "") + shown
-
-
-def _whole_percent(p: float) -> str:
-    d = (Decimal(repr(float(p))) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-    return f"{d}%"
 
 
 def _finite(x: Any) -> bool:
@@ -537,13 +733,28 @@ def _as_of(d: date | None) -> str:
     return f", as of {d.day} {d.strftime('%B')}" if d is not None else ""
 
 
+def _display_name(eid: str, names: dict[str, str]) -> str:
+    """The display name, failing the slot when the name itself states a figure (S25 (9))."""
+    name = names[eid]
+    why = _name_states_a_figure(name)
+    if why is not None:
+        raise _Fail(why)
+    return name
+
+
 def _subject(level: str, eid: str | None, names: dict[str, str]) -> tuple[str, bool]:
     """The subject's words, and whether they are a name (a name keeps its own case)."""
     if level == "account" or not eid or eid == "account":
         return "the account", False
     if eid in names:
-        return names[eid], True
+        return _display_name(eid, names), True
     return f"{_LEVEL_WORDS.get(level, level)} {eid}", False
+
+
+def _possessive(subject: str) -> str:
+    """The subject with "'s", trailing punctuation and spaces stripped first, so a name ending
+    in "Updated." gives "Updated's". A name slot renders the full name unchanged."""
+    return re.sub(r"[\s.!?,;:]+$", "", subject) + "'s"
 
 
 def _start(text: str, is_name: bool) -> str:
@@ -600,14 +811,23 @@ def _run_fig(run: _Run, q: Any, names: dict[str, str]) -> dict[str, str]:
         if x is None:
             raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.quantity_id} has no value to render")
         if q.name in V.RATE_NAMES:
-            value = V.fmt_percent(x)
+            value = _fmt_percent(x)
         elif q.name in V.MONEY_NAMES:
-            value = _money(snap.currency, G5.display_value(q, x, run.kind))
+            value = _money(snap.currency, _fixed(x, _money_decimals(str(q.name), run.kind)))
         else:
-            value = V.fmt_ratio(x)
+            value = _fmt_ratio(x)
     return _forms(
-        f"{subj}'s {label}", is_name, value, status, "" if run.newest else _as_of(run.as_of)
+        f"{_possessive(subj)} {label}",
+        is_name,
+        value,
+        status,
+        "" if run.newest else _as_of(run.as_of),
     )
+
+
+def _leader(comp: Any) -> tuple[str, float]:
+    leader, p = max(comp.p_best.items(), key=lambda kv: (kv[1], kv[0]))
+    return str(leader), p
 
 
 def _cmp(run: _Run, names: dict[str, str]) -> tuple[dict[str, str], SlotQuantity]:
@@ -618,8 +838,8 @@ def _cmp(run: _Run, names: dict[str, str]) -> tuple[dict[str, str], SlotQuantity
         raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no comparison")
     status = snap.decision.status if snap.decision is not None else "marginal"
     as_of = "" if run.newest else _as_of(run.as_of)
-    leader, p = max(comp.p_best.items(), key=lambda kv: (kv[1], kv[0]))
-    quantity: SlotQuantity = {"name": "p_best", "subject": str(leader), "status": status}
+    leader, p = _leader(comp)
+    quantity: SlotQuantity = {"name": "p_best", "subject": leader, "status": status}
     if status == "below_floor":
         nk = str(V.phrasing()["not_knowable"])
         return {
@@ -628,11 +848,11 @@ def _cmp(run: _Run, names: dict[str, str]) -> tuple[dict[str, str], SlotQuantity
         }, quantity
     if not _finite(p):
         raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no p_best for its leader")
-    subj, is_name = _subject("ad", str(leader), names)
+    subj, is_name = _subject("ad", leader, names)
     unit = _CMP_UNITS.get(comp.unit, str(comp.unit))
     if run.kind == "lead" and comp.unit == "orders":
         unit = "sign-ups"
-    pct = _whole_percent(p)
+    pct = _fmt_probability(p)
     caveat = f", {ROUGH}" if status != "estimable" or p < 0.5 else ""
     return {
         "full": f"{subj}, which leads on {unit} with a {pct} chance of being best{caveat}{as_of}",
@@ -642,51 +862,55 @@ def _cmp(run: _Run, names: dict[str, str]) -> tuple[dict[str, str], SlotQuantity
     }, quantity
 
 
-def _entry_subject(entry: dict[str, Any], names: dict[str, str]) -> str:
-    """A notebook quantity's subject: the entity its statement names first, else the account."""
-    statement = R.norm_name(str(entry.get("statement") or ""))
-    best: tuple[int, str] | None = None
-    for eid, name in names.items():
-        for words in (R.norm_name(re.sub(r"[.!?,;:]+$", "", name.strip())), eid.lower()):
-            if not words:
-                continue
-            m = re.search(r"(?<!\w)" + re.escape(words) + r"(?!\w)", statement)
-            if m and (best is None or m.start() < best[0]):
-                best = (m.start(), eid)
-    return best[1] if best else "account"
+def _nb_subject(q: dict[str, Any]) -> tuple[str, str | None]:
+    """S25 (7): the quantity's own ``subject``, else the account; never read from the statement."""
+    subj = q.get("subject")
+    if subj is None:
+        return "account", None
+    if not isinstance(subj, dict) or subj.get("level") not in _LEVELS:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.get('name')} has a malformed subject")
+    level = str(subj["level"])
+    if level == "account":
+        return "account", None
+    eid = subj.get("id")
+    if not isinstance(eid, str) or not eid:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.get('name')} has a subject without an id")
+    return level, eid
 
 
-def _nb_value(q: dict[str, Any]) -> str:
+def _nb_value(q: dict[str, Any], kind: str) -> str:
+    """S25 (6): the closed set of notebook units."""
     x = next((q[k] for k in ("p50", "value") if _finite(q.get(k))), None)
     if x is None:
         raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.get('name')} has no value to render")
     unit = str(q.get("unit") or "").strip()
-    low = unit.lower()
-    if low == "probability":
-        return _whole_percent(x)
-    if low in ("percent", "%", "pct", "share") or (
-        low == "ratio" and q.get("name") in V.RATE_NAMES
-    ):
-        return V.fmt_percent(x)
-    if low == "count":
-        return V.fmt_count(x)
-    if re.fullmatch(r"[A-Za-z]{3}", unit):
-        return _money(unit.upper(), V.fmt_amount(x))
-    return V.fmt_ratio(x)
+    if len(unit) == 3 and unit.isascii() and unit.upper() in ISO_4217:
+        return _money(unit, _fixed(x, _money_decimals(str(q.get("name")), kind)))
+    if unit == "count":
+        return _fmt_count(x)
+    if unit == "probability":
+        return _fmt_probability(x)
+    if unit == "ratio":
+        return _fmt_percent(x)
+    if unit == "percent":
+        return _fixed(x, _rounding()["percent_decimals"]) + "%"
+    if unit == "days":
+        shown = _fmt_count(x)
+        return f"{shown} day" if shown == "1" else f"{shown} days"
+    raise _Fail(f"{R_UNIT}: {unit!r} on quantity {q.get('name')}")
 
 
 def _nb_fig(
     rel: _Release, entry: dict[str, Any], q: dict[str, Any], names: dict[str, str], kind: str
 ) -> tuple[dict[str, str], SlotQuantity]:
     name = str(q.get("name") or "")
-    subject = _entry_subject(entry, names)
+    level, eid = _nb_subject(q)
     label = V.labels(kind)[0].get(name) or _NB_LABELS.get(name) or name.replace("_", " ")
-    if subject == "account":
-        head = f"the {label}" if label.startswith("account") else f"the account's {label}"
-        is_name = False
+    if eid is None:
+        head, is_name = f"the {label}", False
     else:
-        subj, is_name = _subject("ad", subject, names)
-        head = f"{subj}'s {label}"
+        subj, is_name = _subject(level, eid, names)
+        head = f"{_possessive(subj)} {label}"
     status = "marginal" if entry.get("method") == "estimated" else None  # S18
     as_of = ""
     if not rel.newest:
@@ -695,35 +919,11 @@ def _nb_fig(
             m = R.RELEASE_ID_RE.fullmatch(str(rel.catalog.get("release_id") or ""))
             day = date(int(m["day"][:4]), int(m["day"][4:6]), int(m["day"][6:])) if m else None
         as_of = _as_of(day or R.day_of(rel.catalog.get("created_at")))
-    forms = _forms(head, is_name, _nb_value(q), status, as_of)
-    return forms, {"name": name, "subject": subject, "status": status}
+    forms = _forms(head, is_name, _nb_value(q, kind), status, as_of)
+    return forms, {"name": name, "subject": eid or "account", "status": status}
 
 
-def _render_slot(s: _Slot, ctx: _Ctx, names: dict[str, str]) -> _Out:
-    if s.kind == "name":
-        if s.entity_id not in names:
-            raise _Fail(f"{R_UNKNOWN_SLOT}: no ad {s.entity_id} with a display name")
-        name = names[s.entity_id]
-        return _Out({"full": name, "start": name}, None, None)
-    if s.run_id is not None:
-        run = ctx.run(s.run_id)
-        if isinstance(run, str):
-            raise _Fail(run)
-        _check_client(str(run.snap.client_id), ctx.client_id, f"run {s.run_id}")
-        if s.kind == "cmp":
-            forms, quantity = _cmp(run, names)
-            return _Out(forms, quantity, run.newest, run_id=s.run_id)
-        q = next((q for q in run.snap.quantities if q.quantity_id == s.quantity_id), None)
-        if q is None:
-            raise _Fail(f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_id} in run {s.run_id}")
-        level = q.scope.level
-        subject = "account" if level == "account" else q.scope.ids.get(level, "account")
-        quantity: SlotQuantity = {
-            "name": str(q.name),
-            "subject": str(subject),
-            "status": q.feasibility.status,
-        }
-        return _Out(_run_fig(run, q, names), quantity, run.newest, run_id=s.run_id)
+def _nb_quantity(s: _Slot, ctx: _Ctx) -> tuple[_Release, dict[str, Any], dict[str, Any]]:
     assert s.release_id is not None
     claimed = R.client_of_release_id(s.release_id)
     rel = ctx.release(s.release_id)
@@ -744,7 +944,39 @@ def _render_slot(s: _Slot, ctx: _Ctx, names: dict[str, str]) -> _Out:
             f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_name} in entry {s.entry_id} "
             f"of release {s.release_id}"
         )
-    forms, quantity = _nb_fig(rel, entry, q, names, ctx.kind)
+    return rel, entry, q
+
+
+def _render_slot(s: _Slot, ctx: _Ctx, names: dict[str, str]) -> _Out:
+    if s.kind == "name":
+        if s.entity_id not in names:
+            raise _Fail(f"{R_UNKNOWN_SLOT}: no ad {s.entity_id} with a display name")
+        name = _display_name(s.entity_id, names)
+        return _Out({"full": name, "start": name}, None, None)
+    if s.run_id is not None:
+        run = ctx.run(s.run_id)
+        if isinstance(run, str):
+            raise _Fail(run)
+        _check_client(str(run.snap.client_id), ctx.client_id, f"run {s.run_id}")
+        if s.kind == "cmp":
+            forms, quantity = _cmp(run, names)
+            return _Out(forms, quantity, run.newest, run_id=s.run_id)
+        q = next((q for q in run.snap.quantities if q.quantity_id == s.quantity_id), None)
+        if q is None:
+            raise _Fail(f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_id} in run {s.run_id}")
+        level = q.scope.level
+        subject = "account" if level == "account" else q.scope.ids.get(level, "account")
+        quantity: SlotQuantity = {
+            "name": str(q.name),
+            "subject": str(subject),
+            "status": q.feasibility.status,
+        }
+        return _Out(_run_fig(run, q, names), quantity, run.newest, run_id=s.run_id)
+    rel, entry, q = _nb_quantity(s, ctx)
+    kind = ctx.kind
+    if kind is None:
+        raise _Fail(R_KIND_UNKNOWN)
+    forms, quantity = _nb_fig(rel, entry, q, names, kind)
     return _Out(forms, quantity, rel.newest, release_id=s.release_id)
 
 
@@ -759,10 +991,17 @@ def _needed_ids(slots: list[_Slot], ctx: _Ctx) -> set[str]:
             if not isinstance(run, _Run):
                 continue
             if s.kind == "cmp" and run.snap.comparison is not None and run.snap.comparison.p_best:
-                ids.add(max(run.snap.comparison.p_best.items(), key=lambda kv: (kv[1], kv[0]))[0])
+                ids.add(_leader(run.snap.comparison)[0])
             for q in run.snap.quantities:
                 if q.quantity_id == s.quantity_id and q.scope.level != "account":
                     ids.add(str(q.scope.ids.get(q.scope.level, "")))
+        elif s.release_id is not None:
+            try:
+                eid = _nb_subject(_nb_quantity(s, ctx)[2])[1]
+            except _Fail:
+                continue
+            if eid:
+                ids.add(eid)
     ids.discard("")
     return ids
 
@@ -770,6 +1009,21 @@ def _needed_ids(slots: list[_Slot], ctx: _Ctx) -> set[str]:
 # --- the lint (C1, A4) -----------------------------------------------------------------------
 
 _SENT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+#: S25 (11): no sentence ends after these.
+_ABBREVIATIONS_RE = re.compile(r"(?<![\w.])(?:e\.g|i\.e|etc|vs)\.$", re.IGNORECASE)
+
+
+def _sentences(text: str) -> list[str]:
+    out, start = [], 0
+    for m in _SENT_RE.finditer(text):
+        if "\n" not in m.group(0) and _ABBREVIATIONS_RE.search(text[start : m.start()]):
+            continue
+        out.append(text[start : m.start()])
+        start = m.end()
+    out.append(text[start:])
+    return out
+
+
 _ZERO_OR_ALL = ("no", "none", "all", "every")
 _MEASURE_WORDS = (
     "click",
@@ -842,7 +1096,7 @@ def _lint(masked: str, slots: list[_Slot], rows: list[SlotOut], names: dict[str,
     ]
     by_ph = {_placeholder(i): s.token for i, s in enumerate(slots)}
     out: list[str] = []
-    for sent in _SENT_RE.split(masked):
+    for sent in _sentences(masked):
         if not sent.strip():
             continue
         shown = "".join(by_ph.get(c, c) for c in sent).strip()
@@ -947,7 +1201,7 @@ def client_slots(
             }
         )
     for eid in ads:
-        if eid in names:
+        if eid in names and _name_states_a_figure(names[eid]) is None:  # S25 (9)
             items.append(
                 {
                     "token": f"{{name:ad/{eid}}}",
@@ -989,12 +1243,13 @@ def render_client_text(
     reasons: list[str] = []
 
     slots = [_parse_slot(m.group(0), m.start(), m.end()) for m in _SLOT_RE.finditer(text)]
-    parts, pos = [], 0
+    parts, bare, pos = [], [], 0
     for i, s in enumerate(slots):
         parts += [text[pos : s.start], _placeholder(i)]
+        bare += [text[pos : s.start], " "]
         pos = s.end
     masked = "".join(parts) + text[pos:]
-    stripped = "".join(" " if 0xF0000 <= ord(c) < 0x100000 else c for c in masked)
+    stripped = "".join(bare) + text[pos:]  # never from ``masked``: a written placeholder stays
 
     good = [s for s in slots if s.kind is not None and not s.reasons]
     names = ctx.names(_needed_ids(good, ctx))
@@ -1039,8 +1294,7 @@ def render_client_text(
     if "{" in stripped or "}" in stripped:
         left = "".join(c for c in stripped if c in "{}")
         reasons.append(f"{R_BRACE}: {left!r}")
-    for hit in _numeral_hits(stripped):
-        reasons.append(f"{R_FIGURE_OUTSIDE_SLOT}: {hit!r}")
+    reasons += _numeral_reasons(stripped)
     lint = _lint(masked, slots, rows, names)
     reasons += lint
 

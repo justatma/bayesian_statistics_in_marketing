@@ -1,4 +1,5 @@
-"""Write and verify an account notebook release (spec/notebook_format.md, bayes-notebook-1.0.0).
+"""Write and verify an account notebook release (spec/notebook_format.md, bayes-notebook-1.1.0;
+1.0.0 releases still verify).
 
     from bayesian_marketing.notebook.release import verify
 
@@ -17,7 +18,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "bayes-notebook-1.0.0"
+SCHEMA = "bayes-notebook-1.1.0"
+#: Schemas ``verify`` accepts: 1.1.0 adds an optional ``subject`` on a quantity (J4R, S25 (7)).
+SCHEMAS = ("bayes-notebook-1.0.0", SCHEMA)
+SUBJECT_LEVELS = ("account", "campaign", "ad_set", "ad")
 KINDS = ("event", "finding", "figure", "constraint", "open")
 METHODS = ("observed", "estimated")
 SOURCE_KINDS = ("engine_run", "meta_change", "meta_object", "meta_insights", "live_rows")
@@ -68,7 +72,26 @@ def source(kind: str, ref: dict[str, Any], content: Any, redacted: list[str] | N
     }
 
 
-def _check_entry(e: dict, ids: set[str]) -> None:
+def _check_subject(entry_id: str, q: dict, schema: str) -> None:
+    """A quantity's optional ``subject`` (1.1.0): ``{"level", "id"}``; the id may be left out
+    only at the account level."""
+    if "subject" not in q:
+        return
+    subj = q["subject"]
+    if schema == "bayes-notebook-1.0.0":
+        raise ValueError(f"{entry_id}: a quantity subject needs bayes-notebook-1.1.0")
+    if not isinstance(subj, dict) or subj.get("level") not in SUBJECT_LEVELS:
+        raise ValueError(f"{entry_id}: quantity subject {subj!r} has no allowed level")
+    if set(subj) - {"level", "id"}:
+        raise ValueError(f"{entry_id}: quantity subject {subj!r} has fields beyond level and id")
+    eid = subj.get("id")
+    if subj["level"] != "account" and (not isinstance(eid, str) or not eid):
+        raise ValueError(f"{entry_id}: quantity subject {subj!r} names no id")
+    if eid is not None and not isinstance(eid, str):
+        raise ValueError(f"{entry_id}: quantity subject {subj!r} has a non-string id")
+
+
+def _check_entry(e: dict, ids: set[str], schema: str = SCHEMA) -> None:
     need = ("entry_id", "kind", "statement", "method", "date", "as_of", "basis")
     missing = [k for k in need if not e.get(k)]
     if missing:
@@ -84,6 +107,7 @@ def _check_entry(e: dict, ids: set[str]) -> None:
         interval = all(k in q for k in ("p05", "p95", "level"))
         if e["method"] == "estimated" and "p50" in q and not interval:
             raise ValueError(f"{e['entry_id']}: estimated quantity without its interval")
+        _check_subject(e["entry_id"], q, schema)
 
 
 def write_release(
@@ -159,12 +183,12 @@ def verify(folder: Path) -> str:
         if _person_fields(s["content"]):
             raise ValueError(f"{s['source_id']} holds person fields")
     ids = {s["source_id"] for s in sources}
+    if catalog.get("schema") not in SCHEMAS or catalog["release_id"] != folder.name:
+        raise ValueError("catalog schema or release id differs")
     for e in entries:
-        _check_entry(e, ids)
+        _check_entry(e, ids, catalog["schema"])
     if catalog["n_entries"] != len(entries) or catalog["n_sources"] != len(sources):
         raise ValueError("catalog counts differ")
-    if catalog["schema"] != SCHEMA or catalog["release_id"] != folder.name:
-        raise ValueError("catalog schema or release id differs")
     return integrity["release_hash"]
 
 

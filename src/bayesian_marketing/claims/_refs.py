@@ -38,27 +38,55 @@ def client_of_release_id(release_id: str) -> str | None:
 
 
 def client_of_run_file(path: Path) -> str | None:
-    """The client id from a saved snapshot's head, without parsing the whole file."""
+    """S25 (10): the client id read from the whole saved snapshot. A file whose head names a
+    different client from its body is unreadable, and gives None."""
     try:
-        with path.open("rb") as fh:
-            head = fh.read(4096).decode("utf-8", "replace")
-        m = _CLIENT_IN_FILE_RE.search(head)
-        if m:
-            return json.loads(f'"{m.group(1)}"')
-        return json.loads(path.read_text()).get("client_id")
+        return _client_of_text(path.read_text())
     except (OSError, ValueError):
         return None
 
 
-def client_kind(client_id: str) -> str:
-    """``socket.conversion_kind_of``'s rule for a client named without a snapshot (S6)."""
+def _client_of_text(text: str) -> str:
+    body = json.loads(text)
+    if not isinstance(body, dict) or not isinstance(body.get("client_id"), str):
+        raise ValueError("the snapshot names no client")
+    names = [json.loads(f'"{m}"') for m in _CLIENT_IN_FILE_RE.findall(text)]
+    if any(n != body["client_id"] for n in names):
+        raise ValueError("the snapshot's head and body name different clients")
+    return body["client_id"]
+
+
+def config_kind(client_id: str) -> str | None:
+    """``live.refresh._conversion_kind`` on the client config (S6); None when it can't be read."""
     from bayesian_marketing.live import config as live_config
     from bayesian_marketing.live import refresh as live_refresh
 
-    try:  # any failure to read or parse the config is "purchase", never a raise
+    try:
         return live_refresh._conversion_kind(live_config.load_client(client_id))
     except Exception:
-        return "purchase"
+        return None
+
+
+def kind_from_runs(client_id: str) -> str | None:
+    """S25 (8), last resort: "lead" if any of the client's saved runs says lead, "purchase" if
+    some say purchase and none lead, None if none can be read."""
+    from bayesian_marketing import pipeline
+
+    kinds: set[str] = set()
+    runs_dir = pipeline.data_dir() / pipeline.RUNS_DIR
+    for p in sorted(runs_dir.glob("run_*.json")) if runs_dir.is_dir() else []:
+        try:
+            text = p.read_text()
+            if _client_of_text(text) != client_id:
+                continue
+            kind = json.loads(text).get("conversion_kind")
+        except (OSError, ValueError):
+            continue
+        if kind in ("lead", "purchase"):
+            kinds.add(kind)
+    if "lead" in kinds:
+        return "lead"
+    return "purchase" if kinds else None
 
 
 def run_kind(snap: Any) -> str:
@@ -71,8 +99,10 @@ def run_kind(snap: Any) -> str:
 
 
 def default_load_run(run_id: str) -> Any:
+    """``pipeline.load_snapshot``, after S25 (10)'s check that the file names one client."""
     from bayesian_marketing import pipeline
 
+    _client_of_text(pipeline.snapshot_path(run_id).read_text())
     return pipeline.load_snapshot(run_id)
 
 

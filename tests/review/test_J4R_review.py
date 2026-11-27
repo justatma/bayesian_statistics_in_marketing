@@ -231,8 +231,10 @@ def test_J4R_review_notebook_money_with_a_non_iso_unit_has_no_currency(
     )
     rel = env.release([entry])
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'amount_spent')}.")
-    assert res["ok"], res["reasons"]
-    assert "$" in res["text"], res["text"]
+    # S25 (6) sets this differently: a unit outside the closed set fails the slot, it is not
+    # rendered as dollars. The finding (no bare number goes out) still holds.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_UNIT in r for r in res["reasons"]), res["reasons"]
 
 
 def test_J4R_review_notebook_unit_of_three_letters_is_read_as_a_currency(
@@ -245,8 +247,10 @@ def test_J4R_review_notebook_unit_of_three_letters_is_read_as_a_currency(
     )
     rel = env.release([entry])
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'run_length')}.")
-    assert res["ok"], res["reasons"]
-    assert "DAY" not in res["text"], res["text"]
+    # S25 (6) sets this differently: "days" is in the closed set and "day" is not, so the slot
+    # fails rather than rendering. The finding (no "14 DAY") still holds.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_UNIT in r for r in res["reasons"]), res["reasons"]
 
 
 def test_J4R_review_notebook_campaign_budget_is_called_the_accounts(env: J4REnv, run: str) -> None:
