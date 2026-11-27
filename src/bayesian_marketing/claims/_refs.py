@@ -283,6 +283,18 @@ def release_is_newest(release_id: str, catalog: dict[str, Any]) -> bool:
     return bool(standing) and max(standing, key=release_key) == release_id
 
 
+def default_load_parents(client_id: str) -> dict[str, str]:
+    """J4R.2 (3): the live store, opened read only: ad id to ad set id from each ad's newest row.
+    No store on this machine means no parents, not a failure."""
+    raise NotImplementedError
+
+
+def default_load_display_names(client_id: str) -> dict[str, str]:
+    """J4R.2 (9): the client config's ``display_names``, the client resolved as ``resolve_client``
+    does (the AtmaOS id alias included). Raises when the config can't be loaded."""
+    raise NotImplementedError
+
+
 # --- names (S16) -----------------------------------------------------------------------------
 
 

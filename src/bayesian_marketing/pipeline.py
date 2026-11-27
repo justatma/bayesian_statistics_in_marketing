@@ -163,6 +163,8 @@ class RunSnapshot(BaseModel):
     conversion_kind: Literal["purchase", "lead"] | None = None
     # J4 (S16): ad, ad set and campaign id -> name as the pull read them; empty before J4
     entity_names: dict[str, str] = {}
+    # J4R.2 (10): ad id -> ad set id as the pull read them; empty before J4R.2
+    entity_parents: dict[str, str] = {}
     manifest_id: str
     dataset_hashes: list[str]
     # J2 (S31): the bayes-rows-c1 keys of the rows the run read, sorted; empty before J2
@@ -977,6 +979,7 @@ def execute(
     extra_dataset_hashes: Sequence[str] = (),
     row_keys: Sequence[str] = (),
     rows_form: str | None = None,
+    entity_parents: dict[str, str] | None = None,
 ) -> RunContext:
     """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage.
     ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else.

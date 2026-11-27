@@ -95,6 +95,8 @@ class ClientConfig(Frozen):
     priors: dict[str, str] = Field(default_factory=dict)
     # J4R.1: AtmaOS's id for the client, so a caller holding only that id finds this config.
     atmaos_client_id: str | None = None
+    # J4R.2 (8): platform id to a display name, held to the display-name rule on load (to build)
+    display_names: dict[str, str] = Field(default_factory=dict)
 
 
 class NarrativeBlock(Frozen):
