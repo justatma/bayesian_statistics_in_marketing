@@ -72,6 +72,8 @@ class Result(TypedDict):
 LoadRun = Callable[[str], Any]
 #: A loader returns ``(catalog, entries, sources)`` of a verified release by release id, or raises.
 LoadRelease = Callable[[str], tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]]
+#: A loader returns id -> name for a client's ads, ad sets and campaigns (S16).
+LoadNames = Callable[[str], dict[str, str]]
 
 # --- the fixed reason texts (J4 points 1 to 7; the acceptance set may assert them) ------------
 
@@ -88,6 +90,7 @@ R_CAVEAT = "a rough estimate quoted without saying so"
 R_STALE = "the ref is not the newest; date the figure or use the newest"
 R_PURCHASE_WORD = "this account converts on sign-ups, not orders"
 R_TWO_CLIENTS = "the refs name more than one client"
+R_NEEDS_RUN = "a comparison needs a run ref"
 
 
 def check_client_figures(
@@ -96,8 +99,10 @@ def check_client_figures(
     *,
     load_run: LoadRun | None = None,
     load_release: LoadRelease | None = None,
+    load_names: LoadNames | None = None,
 ) -> Result:
     """J4. ``load_run`` defaults to ``pipeline.load_snapshot``; ``load_release`` to reading
-    ``notebook.root()/<client>/releases/<release_id>`` after ``notebook.verify``. A ref that cannot
-    be read fails the call with a reason naming it; only a wrong argument type raises."""
+    ``notebook.root()/<client>/releases/<release_id>`` after ``notebook.verify``; ``load_names``
+    to the live store, read only, newest name per id (S16). A ref that cannot be read fails the
+    call with a reason naming it; only a wrong argument type raises."""
     raise NotImplementedError

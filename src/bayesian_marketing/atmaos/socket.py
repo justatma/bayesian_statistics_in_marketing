@@ -547,9 +547,12 @@ def check_client_figures(
     *,
     load_run=None,
     load_release=None,
+    load_names=None,
 ) -> dict:
     """J4: the figure check a persona runs on a sentence before she says it to the client.
     See ``claims.figures.check_client_figures``; this is its socket entry (F7)."""
     from bayesian_marketing.claims.figures import check_client_figures as _check
 
-    return dict(_check(text, refs, load_run=load_run, load_release=load_release))
+    return dict(
+        _check(text, refs, load_run=load_run, load_release=load_release, load_names=load_names)
+    )
