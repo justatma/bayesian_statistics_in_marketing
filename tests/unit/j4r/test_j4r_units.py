@@ -429,7 +429,7 @@ def test_S25_7_a_1_0_0_release_still_verifies(env: J4REnv, monkeypatch: pytest.M
     from bayesian_marketing.notebook import release as nb_release
 
     monkeypatch.setattr(nb_release, "SCHEMA", "bayes-notebook-1.0.0")
-    rel = env.release()
+    rel = env.release([_nb_entry({"name": "x", "value": 1, "unit": "count"})])  # no subject
     folder = env.release_folder(rel)
     assert '"schema":"bayes-notebook-1.0.0"' in (folder / "catalog.json").read_text()
     assert nb_release.verify(folder)
