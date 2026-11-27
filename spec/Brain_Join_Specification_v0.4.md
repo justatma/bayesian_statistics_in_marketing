@@ -1,4 +1,4 @@
-# Brain join specification, v0.3
+# Brain join specification, v0.4 (draft: J4R)
 
 26 November 2026, the Bayesian Engineer. Version 0.2 takes the blind review of v0.1 (`spec/reviews/brain_join_blind_01.md`, Sonnet: 2 blocking, 6 major, 2 minor, 14 undecided). Every point is settled in S1 to S14 at the end. None needed the owner, so nothing went to him from this review. Version 0.3 takes the Principal Architect's note on v0.2 (26 Nov, P1 to P6 at the end). This spec covers the engine's side of joining the engine to AtmaOS and to Imani Brooks, the AtmaOS team member who explains the engine's work to the client. It follows spec 42 FR7.2 in the AtmaOS repository and the owner's rulings: D54 here, and D676 and D677 in AtmaOS. Pieces already built are listed so the rest can be read against them. Each piece below that has a status of "to build" has an interface and checks. Nothing in it is built until the blind spec review's undecided list is answered.
 
@@ -204,3 +204,77 @@ S20. Comparatives and causal words. With a run ref, `check_narrative`'s comparat
 S21. Newest. For a run, it's the latest `started_at` in the run record among that client's saved runs (ties broken by run id). For a release, it's the client's release with the greatest (day, n) in its id. A release named as some other release's parent is never newest.
 S22. Generic money words ("spend", "spent", "budget", "cost") don't name a measure. A measure is named only by a metric alias, or by a notebook quantity's name words or its entry's tags.
 S23 (the J4 test writer, second pass). (1) `value_at_rounding` is the matched quantity's value as the engine displays it for that run's kind: cents for cost-per on a lead run, the registry's rounding otherwise. It is not the precision the figure was compared at. So "$3" placed on a 3.35 cpa gives "$3.35". (2) For runs with the same `started_at`, the greater run id is newest. (3) The newest release is the greatest (day, n) among the client's releases that no other release names as its parent. (4) Under S20, only `check_narrative`'s comparative and causal reasons are added, never its number reasons, which would refuse a numeric ad id as a figure.
+
+## J4R. Rendered figures (v0.4 draft, replaces J4's free-text reading once agreed)
+
+Why: two blind reviews of J4 on Sonnet found 12 and then 14 false passes of wrong figures (`tests/review/test_J4_review.py`, `tests/review/test_J4_review2.py` on review2/J4 b3e71c9). Each came from inferring, out of free prose, which number means which quantity of which ad. Proposed 26 Nov by the Bayesian Engineer. The Head Engineer supports it; it waits on the Principal Architect. Under J4R the engine writes every figure, and the persona's own words carry none.
+
+### The call
+
+`bayesian_marketing.atmaos.socket.render_client_text(text: str, *, load_run=None, load_release=None, load_names=None) -> dict`
+
+Returns:
+
+```json
+{
+  "ok": true,
+  "text": "<the text with every placeholder rendered>",
+  "placeholders": [
+    {"token": "{fig:clm_0003}", "ok": true, "rendered": "IMG3_TXT1's click-through rate, about 4.4% (still a rough estimate)",
+     "ref": {"kind": "claim", "claim_id": "clm_0003"}, "quantity": {"name": "ctr", "subject": "1202...0526", "status": "marginal"},
+     "newest": true, "reasons": []}
+  ],
+  "reasons": [],
+  "engine_version": "...", "inputs_hash": "...", "checked_at": "..."
+}
+```
+
+`ok` is true only when every placeholder renders and the free words pass the words rule. When `ok` is false, `text` is null. The caller drops the sentence or the reply and never sends a partial rendering.
+
+### Placeholder grammar
+
+```
+placeholder := "{" kind ":" ref [ "|" option ]* "}"
+kind        := "fig" | "cmp" | "name"
+ref         := claim_id                       ; an AtmaOS claim id: the caller resolves it to its engine item first
+             | "run/" run_id "/" quantity_id  ; a posterior quantity
+             | "nb/" release_id "/" entry_id [ "/" quantity_name ]
+             | "run/" run_id                  ; for cmp only: that run's comparison
+option      := "short"                        ; value and caveat only, no subject or measure
+             | "bounds"                       ; the 90% interval as well: "about 4.4% (4.0% to 4.7%)"
+```
+
+Claim ids cross the socket already resolved: AtmaOS replaces `{fig:<claim_id>}` with the claim's engine item, keeping the claim id for the echo, as `{fig:run/<run>/<q>#<claim_id>}` or `{fig:nb/<rel>/<entry>/<q>#<claim_id>}`. The engine never reads the Brain (F7).
+
+### How a placeholder renders
+
+All wording comes from the registry, with lead labels on a lead account (J5):
+- `fig`: "<subject>'s <measure label>, <value>", followed by the status phrase.
+  - Estimable: the value is the median at the engine's display rounding.
+  - Marginal: "about <median>" plus the `caveat_marginal` phrase.
+  - Below floor: "<subject>'s <measure label> is not knowable yet", with no number.
+  - An observed notebook quantity: its value, with no caveat.
+  - When the ref isn't the newest for the client, add " (as of <window end or release day>)".
+- `cmp`: the comparison's leader and its p_best: "<leader> is ahead on <unit>, with a <p>% chance of being best". When the comparison is not decided, the leader's p_best is below 0.5, or the decision's status is marginal, the phrase adds the caveat. When it is below floor, it renders "which ad is best is not knowable yet".
+- `name`: the subject's display name, so the persona can name an ad without typing it.
+
+### The words rule (what the reviews can still attack, kept small)
+
+After the placeholders are removed, the remaining text must contain none of the following:
+- any digit in any script (Unicode category Nd), or any numeric character (categories No and Nl), which covers fraction glyphs;
+- any spelled number or quantity word: an explicit list, `QUANTITY_WORDS` (zero to a billion, half, third, quarter, dozen, couple, several, handful, most, majority, minority, double, triple, twice, thrice and the like, with their -fold, -ly and -ing forms);
+- any `%`, `‰` or currency sign, or any currency code from the client's currency list;
+- any comparative or causal word from the registry lexicons in a sentence that names an ad (by a `name` placeholder or a known name). A comparison must be a `cmp` placeholder.
+
+Any hit fails the call, quoting the word. Ordinary words like "a" and "one of" are on an explicit allow list, and the test covers both lists in full.
+
+### Checks (frozen before the build)
+
+These are kept from J4: (f) below floor, (i) unreadable refs, (m) two clients, (p) staleness, P4 loaders, S16 names, S21 newest, and the J5 lead labels. These are new:
+- Every reviewer finding in both review files is re-expressed as a case. Its wrong figure can't be written as free text (the words rule fails it), and its placeholder form renders the right figure.
+- Every word in `QUANTITY_WORDS` fails.
+- Every Nd, No and Nl character in a sample of 50 across scripts fails.
+- Each status renders its phrase.
+- `ok` false gives `text` null.
+
+The free-text J4 (`check_client_figures`) is not merged. Its code for loading refs, staleness, names and labels moves into the renderer.
