@@ -970,8 +970,10 @@ def execute(
     manifest_dir: Path | None = None,
     pulls: list[PlatformPull] | None = None,
     on_stage: Stage | None = None,
+    entity_names: dict[str, str] | None = None,
 ) -> RunContext:
-    """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage."""
+    """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage.
+    ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else."""
     started = utcnow()
     manifest_dir = Path(manifest_dir) if manifest_dir is not None else Path.cwd()
     start, end = request.window
@@ -1227,6 +1229,7 @@ def execute(
         run_id=run_id,
         client_id=manifest.client_id,
         conversion_kind=request.conversion_kind,
+        entity_names=dict(entity_names or {}),
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,

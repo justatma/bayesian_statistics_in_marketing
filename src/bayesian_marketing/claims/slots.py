@@ -7,8 +7,19 @@ the numeral rule, which is the guarantee. The comparative lint is a fixed word l
 
 from __future__ import annotations
 
+import math
+import re
+import unicodedata
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypedDict
+
+from bayesian_marketing.claims import _refs as R
+from bayesian_marketing.claims import check as G5
+from bayesian_marketing.claims import vocab as V
+from bayesian_marketing.core import inputs_hash, utcnow
 
 SlotKind = Literal["fig", "cmp", "name", "date"]
 Form = Literal["full", "start"]
@@ -149,10 +160,731 @@ R_ZERO_OR_ALL = "a word stating none or all next to a measure; use a slot"
 #: A2 to A4: the numeral rule normalises NFKC, casefolds, strips category Cf, and breaks words at
 #: whitespace, hyphens and slashes before matching whole words.
 
+#: ISO 4217 codes (active and fund codes), matched as whole words in upper case only (S24 (3)).
+_ISO_4217_TEXT = """
+    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD
+    BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUC CUP CVE CZK DJF DKK DOP
+    DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR
+    IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD
+    MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB
+    PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD
+    SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS
+    VED VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA
+    XXX YER ZAR ZMW ZWG ZWL
+"""
+ISO_4217: frozenset[str] = frozenset(_ISO_4217_TEXT.split())
+
+#: The caveat inside a marginal form (the forms table; S24 (6) for cmp).
+ROUGH = "still a rough estimate"
+
+# --- the numeral rule's word forms -----------------------------------------------------------
+
+_NUMBER_WORDS = QUANTITY_WORDS[: QUANTITY_WORDS.index("billion") + 1]
+_PLURAL = {
+    "zero": "zeros",
+    "six": "sixes",
+    "twenty": "twenties",
+    "thirty": "thirties",
+    "forty": "forties",
+    "fifty": "fifties",
+    "sixty": "sixties",
+    "seventy": "seventies",
+    "eighty": "eighties",
+    "ninety": "nineties",
+}
+_ORDINAL = {
+    "zero": "zeroth",
+    "four": "fourth",
+    "five": "fifth",
+    "six": "sixth",
+    "seven": "seventh",
+    "eight": "eighth",
+    "nine": "ninth",
+    "ten": "tenth",
+    "eleven": "eleventh",
+    "twelve": "twelfth",
+    "thirteen": "thirteenth",
+    "fourteen": "fourteenth",
+    "fifteen": "fifteenth",
+    "sixteen": "sixteenth",
+    "seventeen": "seventeenth",
+    "eighteen": "eighteenth",
+    "nineteen": "nineteenth",
+    "twenty": "twentieth",
+    "thirty": "thirtieth",
+    "forty": "fortieth",
+    "fifty": "fiftieth",
+    "sixty": "sixtieth",
+    "seventy": "seventieth",
+    "eighty": "eightieth",
+    "ninety": "ninetieth",
+    "hundred": "hundredth",
+    "thousand": "thousandth",
+    "million": "millionth",
+    "billion": "billionth",
+}
+#: Forms of the other words, where English has them; a few more than the floor (S24 (5)) since
+#: adding forms only refuses more.
+_OTHER_FORMS = (
+    "halved",
+    "halving",
+    "thirds",
+    "thirdly",
+    "quarters",
+    "quarterly",
+    "dozens",
+    "couples",
+    "handfuls",
+    "scores",
+    "mostly",
+    "majorities",
+    "minorities",
+    "doubles",
+    "doubly",
+    "doubling",
+    "triples",
+    "triply",
+    "tripling",
+    "singles",
+    "singly",
+    "solely",
+    "severally",
+)
+
 
 def quantity_word_forms() -> frozenset[str]:
     """Every word form the numeral rule refuses, from ``QUANTITY_WORDS``."""
-    raise NotImplementedError
+    out = set(QUANTITY_WORDS) | set(_OTHER_FORMS)
+    for w in _NUMBER_WORDS:
+        out.add(_PLURAL.get(w, w + "s"))
+        if w not in ("zero", "one"):
+            out.add(w + "fold")
+        if w in _ORDINAL:
+            out.add(_ORDINAL[w])
+            out.add(_ORDINAL[w] + "s")
+    return frozenset(out)
+
+
+_FORMS = quantity_word_forms()
+_PERCENT_SINGLE = {"percent", "percents", "pct", "percentage", "percentages"}
+_PERCENT_PHRASES = tuple(p for p in PERCENT_WORDS if " " in p)
+_WORD_RE = re.compile(r"[^\W_]+")
+_CATEGORIES = ("Nd", "No", "Nl", "Sc")
+
+
+def _phrase_hit(tokens: list[str], phrase: str) -> bool:
+    """``phrase`` as consecutive tokens; its last word may take a plural -s."""
+    want = phrase.split()
+    n = len(want)
+    for i in range(len(tokens) - n + 1):
+        got = tokens[i : i + n]
+        if got[:-1] == want[:-1] and got[-1] in (want[-1], want[-1] + "s"):
+            return True
+    return False
+
+
+def _numeral_hits(text: str) -> list[str]:
+    """The numeral rule on the text with the slots removed: the words and characters it refuses,
+    in order, each once. Categories on the raw text (S24 (2)); signs and codes after NFKC and Cf
+    stripping; words after casefolding too (A3)."""
+    hits: list[str] = []
+
+    def add(x: str) -> None:
+        if x not in hits:
+            hits.append(x)
+
+    for ch in text:
+        if unicodedata.category(ch) in _CATEGORIES:
+            add(ch)
+    nf = "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
+    for ch in nf:
+        if unicodedata.category(ch) in _CATEGORIES:
+            add(ch)
+    for sign in PERCENT_SIGNS:
+        if sign in nf or sign in text:
+            add(sign)
+    for m in _WORD_RE.finditer(nf):
+        if m.group(0) in ISO_4217:  # case-sensitive: upper case only
+            add(m.group(0))
+    tokens = _WORD_RE.findall(nf.casefold())
+    for t in tokens:
+        if t in _FORMS or t in _PERCENT_SINGLE:
+            add(t)
+    for phrase in (*QUANTITY_PHRASES, *_PERCENT_PHRASES):
+        if _phrase_hit(tokens, phrase):
+            add(phrase)
+    return hits
+
+
+# --- slots: the grammar ----------------------------------------------------------------------
+
+_SLOT_RE = re.compile(r"\{[^{}]*\}")
+_ID = r"[\w-]+"
+_TAIL = r"(?:#(?P<claim>[\w.:-]+))?(?:\|(?P<form>full|start))?"
+_FIG_RE = re.compile(
+    rf"fig:(?:run/(?P<run>{_ID})/(?P<qid>{_ID})|nb/(?P<rel>{_ID})/(?P<entry>{_ID})/"
+    rf"(?P<qname>{_ID})){_TAIL}"
+)
+_CMP_RE = re.compile(rf"cmp:run/(?P<run>{_ID}){_TAIL}")
+_NAME_RE = re.compile(rf"name:ad/(?P<eid>{_ID})(?:\|(?P<form>full|start))?")
+_DATE_RE = re.compile(r"date:(?P<iso>.*)", re.DOTALL)
+_ISO_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?"
+)
+
+
+def _strict_iso(value: str) -> bool:
+    if not _ISO_RE.fullmatch(value):
+        return False
+    try:
+        if "T" in value:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+@dataclass
+class _Slot:
+    token: str
+    start: int
+    end: int
+    kind: str | None = None  # None: outside the grammar
+    ref: str = ""
+    form: str = "full"
+    claim_id: str | None = None
+    run_id: str | None = None
+    quantity_id: str | None = None
+    release_id: str | None = None
+    entry_id: str | None = None
+    quantity_name: str | None = None
+    entity_id: str | None = None
+    reasons: list[str] = field(default_factory=list)
+
+
+def _parse_slot(token: str, start: int, end: int) -> _Slot:
+    s = _Slot(token, start, end)
+    body = token[1:-1]
+    s.ref = body
+    if m := _FIG_RE.fullmatch(body):
+        s.kind, s.claim_id, s.form = "fig", m["claim"], m["form"] or "full"
+        if m["run"]:
+            s.run_id, s.quantity_id = m["run"], m["qid"]
+            s.ref = f"run/{s.run_id}/{s.quantity_id}"
+        else:
+            s.release_id, s.entry_id, s.quantity_name = m["rel"], m["entry"], m["qname"]
+            s.ref = f"nb/{s.release_id}/{s.entry_id}/{s.quantity_name}"
+    elif m := _CMP_RE.fullmatch(body):
+        s.kind, s.claim_id, s.form, s.run_id = "cmp", m["claim"], m["form"] or "full", m["run"]
+        s.ref = f"run/{s.run_id}"
+    elif m := _NAME_RE.fullmatch(body):
+        s.kind, s.form, s.entity_id = "name", m["form"] or "full", m["eid"]
+        s.ref = f"ad/{s.entity_id}"
+    elif m := _DATE_RE.fullmatch(body):
+        s.kind, s.ref = "date", m["iso"]
+        if not _strict_iso(m["iso"]):
+            s.reasons.append(f"{R_BAD_DATE}: {m['iso']!r}")
+    else:
+        s.reasons.append(f"{R_BAD_SLOT}: {token}")
+    return s
+
+
+# --- the engine items behind the slots -------------------------------------------------------
+
+
+@dataclass
+class _Run:
+    snap: Any
+    kind: str
+    newest: bool
+    as_of: date
+
+
+@dataclass
+class _Release:
+    catalog: dict[str, Any]
+    entries: list[dict[str, Any]]
+    sources: list[dict[str, Any]]
+    client: str
+    newest: bool
+
+
+@dataclass
+class _Ctx:
+    client_id: str
+    load_run: LoadRun
+    load_release: LoadRelease
+    load_names: LoadNames
+    runs: dict[str, _Run | str] = field(default_factory=dict)  # str: why it cannot be read
+    releases: dict[str, _Release | str] = field(default_factory=dict)
+    _names: dict[str, str] | None = None
+    _kind: str | None = None
+    names_reasons: list[str] = field(default_factory=list)
+
+    def run(self, run_id: str) -> _Run | str:
+        if run_id not in self.runs:
+            try:
+                snap = self.load_run(run_id)
+                if isinstance(snap, dict):
+                    from bayesian_marketing import pipeline
+
+                    snap = pipeline.RunSnapshot.model_validate(snap)
+                if str(snap.run_id) != run_id:
+                    raise ValueError(f"the loader gave run {snap.run_id}")
+                got: _Run | str = _Run(
+                    snap, R.run_kind(snap), R.run_is_newest(snap), snap.window[1]
+                )
+            except Exception as exc:  # any failure is a reason naming the run, never a raise
+                got = f"run {run_id}: cannot be read ({type(exc).__name__}: {exc})"
+            self.runs[run_id] = got
+        return self.runs[run_id]
+
+    def release(self, release_id: str) -> _Release | str:
+        if release_id not in self.releases:
+            try:
+                catalog, entries, sources = self.load_release(release_id)
+                if not isinstance(catalog, dict):
+                    raise TypeError("the catalog is not an object")
+                entries = [e for e in entries if isinstance(e, dict)]
+                sources = list(sources)
+                client = str(catalog.get("client_id") or R.client_of_release_id(release_id))
+                got: _Release | str = _Release(
+                    catalog, entries, sources, client, R.release_is_newest(release_id, catalog)
+                )
+            except Exception as exc:
+                got = f"release {release_id}: cannot be read ({type(exc).__name__}: {exc})"
+            self.releases[release_id] = got
+        return self.releases[release_id]
+
+    @property
+    def kind(self) -> str:
+        """The client's conversion kind, for a notebook figure and the lint (S6)."""
+        if self._kind is None:
+            self._kind = R.client_kind(self.client_id)
+        return self._kind
+
+    def newest_run(self) -> tuple[str | None, _Run | str | None]:
+        rid = R.newest_run_id(self.client_id)
+        return rid, (self.run(rid) if rid is not None else None)
+
+    def newest_release(self) -> tuple[str | None, _Release | str | None]:
+        rid = R.newest_release_id(self.client_id)
+        return rid, (self.release(rid) if rid is not None else None)
+
+    def names(self, needed: set[str]) -> dict[str, str]:
+        """S16: the client's snapshots' names, then its notebook sources', then the store's.
+        The store is read when no snapshot read has names, or a needed id is still unnamed."""
+        if self._names is not None and needed <= set(self._names):
+            return self._names
+        self.newest_run()
+        self.newest_release()
+        snaps = [
+            r
+            for r in self.runs.values()
+            if isinstance(r, _Run) and r.snap.client_id == self.client_id
+        ]
+        snaps.sort(key=lambda r: (not r.newest, r.snap.run_id))
+        layers = [{str(k): str(v) for k, v in r.snap.entity_names.items()} for r in snaps]
+        nb: dict[str, str] = {}
+        for rel in self.releases.values():
+            if isinstance(rel, _Release) and rel.client == self.client_id:
+                for k, v in R.source_names(rel.sources).items():
+                    nb.setdefault(k, v)
+        layers.append(nb)
+        merged = R.merge_names(layers)
+        if not any(layers[:-1]) or not needed <= set(merged):
+            try:
+                got = self.load_names(self.client_id)
+                layers.append({str(k): str(v) for k, v in dict(got).items()})
+                merged = R.merge_names(layers)
+            except Exception as exc:
+                why = f"names for {self.client_id}: cannot be read ({type(exc).__name__}: {exc})"
+                if why not in self.names_reasons:
+                    self.names_reasons.append(why)
+        self._names = merged
+        return merged
+
+
+# --- rendering -------------------------------------------------------------------------------
+
+_SYMBOLS = {"USD": "$", "EUR": "€", "GBP": "£"}
+_LEVEL_WORDS = {"ad": "ad", "ad_set": "ad set", "campaign": "campaign"}
+_CMP_UNITS = {"clicks": "clicks", "orders": "orders", "leads": "sign-ups", "money": "value"}
+_NB_LABELS = {"p_best": "chance of being best"}
+
+
+def _money(currency: str | None, shown: str) -> str:
+    neg, shown = shown.startswith("-"), shown.lstrip("-")
+    if currency and currency.upper() in _SYMBOLS:
+        shown = _SYMBOLS[currency.upper()] + shown
+    elif currency:
+        shown = f"{shown} {currency}"
+    return ("-" if neg else "") + shown
+
+
+def _whole_percent(p: float) -> str:
+    d = (Decimal(repr(float(p))) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    return f"{d}%"
+
+
+def _finite(x: Any) -> bool:
+    return isinstance(x, int | float) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _as_of(d: date | None) -> str:
+    return f", as of {d.day} {d.strftime('%B')}" if d is not None else ""
+
+
+def _subject(level: str, eid: str | None, names: dict[str, str]) -> tuple[str, bool]:
+    """The subject's words, and whether they are a name (a name keeps its own case)."""
+    if level == "account" or not eid or eid == "account":
+        return "the account", False
+    if eid in names:
+        return names[eid], True
+    return f"{_LEVEL_WORDS.get(level, level)} {eid}", False
+
+
+def _start(text: str, is_name: bool) -> str:
+    return text if is_name or not text else text[0].upper() + text[1:]
+
+
+def _forms(
+    head: str, is_name: bool, value: str | None, status: str | None, as_of: str
+) -> dict[str, str]:
+    """The forms table (C4) for one figure."""
+    nk = str(V.phrasing()["not_knowable"])
+    if status == "below_floor":
+        full, start = f"{head}, which is {nk}", f"{head} is {nk}"
+    elif status in (None, "estimable"):
+        full, start = f"{head} of {value}", f"{head} is {value}"
+    else:  # marginal, or a status this renderer does not know: the caveat stays
+        full, start = f"{head} of about {value}, {ROUGH}", f"{head} is about {value}, {ROUGH}"
+    return {"full": full + as_of, "start": _start(start, is_name) + as_of}
+
+
+class _Fail(Exception):
+    pass
+
+
+@dataclass
+class _Out:
+    forms: dict[str, str]
+    quantity: SlotQuantity | None
+    newest: bool | None
+    run_id: str | None = None
+    release_id: str | None = None
+
+
+def _check_client(client: str, want: str, what: str) -> None:
+    if client != want:
+        raise _Fail(f"{R_OTHER_CLIENT}: {what} belongs to {client}, not {want}")
+
+
+def _run_value(q: Any) -> float | None:
+    summ = q.estimate.summary
+    return next((summ[k] for k in ("q50", "mean", "value") if _finite(summ.get(k))), None)
+
+
+def _run_fig(run: _Run, q: Any, names: dict[str, str]) -> dict[str, str]:
+    snap = run.snap
+    level = q.scope.level
+    eid = None if level == "account" else q.scope.ids.get(level)
+    subj, is_name = _subject(level, eid, names)
+    label = V.labels(run.kind)[0].get(q.name, str(q.name).replace("_", " "))
+    status = q.feasibility.status
+    value = None
+    if status != "below_floor":
+        x = _run_value(q)
+        if x is None:
+            raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.quantity_id} has no value to render")
+        if q.name in V.RATE_NAMES:
+            value = V.fmt_percent(x)
+        elif q.name in V.MONEY_NAMES:
+            value = _money(snap.currency, G5.display_value(q, x, run.kind))
+        else:
+            value = V.fmt_ratio(x)
+    return _forms(
+        f"{subj}'s {label}", is_name, value, status, "" if run.newest else _as_of(run.as_of)
+    )
+
+
+def _cmp(run: _Run, names: dict[str, str]) -> tuple[dict[str, str], SlotQuantity]:
+    """C5: from the run's comparison record and decision only, never from two figures."""
+    snap = run.snap
+    comp = snap.comparison
+    if comp is None or not comp.p_best:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no comparison")
+    status = snap.decision.status if snap.decision is not None else "marginal"
+    as_of = "" if run.newest else _as_of(run.as_of)
+    leader, p = max(comp.p_best.items(), key=lambda kv: (kv[1], kv[0]))
+    quantity: SlotQuantity = {"name": "p_best", "subject": str(leader), "status": status}
+    if status == "below_floor":
+        nk = str(V.phrasing()["not_knowable"])
+        return {
+            "full": f"which ad is best, {nk}{as_of}",
+            "start": f"Which ad is best is {nk}{as_of}",
+        }, quantity
+    if not _finite(p):
+        raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no p_best for its leader")
+    subj, is_name = _subject("ad", str(leader), names)
+    unit = _CMP_UNITS.get(comp.unit, str(comp.unit))
+    if run.kind == "lead" and comp.unit == "orders":
+        unit = "sign-ups"
+    pct = _whole_percent(p)
+    caveat = f", {ROUGH}" if status != "estimable" or p < 0.5 else ""
+    return {
+        "full": f"{subj}, which leads on {unit} with a {pct} chance of being best{caveat}{as_of}",
+        "start": _start(f"{subj} leads on {unit}, with a {pct} chance of being best", is_name)
+        + caveat
+        + as_of,
+    }, quantity
+
+
+def _entry_subject(entry: dict[str, Any], names: dict[str, str]) -> str:
+    """A notebook quantity's subject: the entity its statement names first, else the account."""
+    statement = R.norm_name(str(entry.get("statement") or ""))
+    best: tuple[int, str] | None = None
+    for eid, name in names.items():
+        for words in (R.norm_name(re.sub(r"[.!?,;:]+$", "", name.strip())), eid.lower()):
+            if not words:
+                continue
+            m = re.search(r"(?<!\w)" + re.escape(words) + r"(?!\w)", statement)
+            if m and (best is None or m.start() < best[0]):
+                best = (m.start(), eid)
+    return best[1] if best else "account"
+
+
+def _nb_value(q: dict[str, Any]) -> str:
+    x = next((q[k] for k in ("p50", "value") if _finite(q.get(k))), None)
+    if x is None:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: quantity {q.get('name')} has no value to render")
+    unit = str(q.get("unit") or "").strip()
+    low = unit.lower()
+    if low == "probability":
+        return _whole_percent(x)
+    if low in ("percent", "%", "pct", "share") or (
+        low == "ratio" and q.get("name") in V.RATE_NAMES
+    ):
+        return V.fmt_percent(x)
+    if low == "count":
+        return V.fmt_count(x)
+    if re.fullmatch(r"[A-Za-z]{3}", unit):
+        return _money(unit.upper(), V.fmt_amount(x))
+    return V.fmt_ratio(x)
+
+
+def _nb_fig(
+    rel: _Release, entry: dict[str, Any], q: dict[str, Any], names: dict[str, str], kind: str
+) -> tuple[dict[str, str], SlotQuantity]:
+    name = str(q.get("name") or "")
+    subject = _entry_subject(entry, names)
+    label = V.labels(kind)[0].get(name) or _NB_LABELS.get(name) or name.replace("_", " ")
+    if subject == "account":
+        head = f"the {label}" if label.startswith("account") else f"the account's {label}"
+        is_name = False
+    else:
+        subj, is_name = _subject("ad", subject, names)
+        head = f"{subj}'s {label}"
+    status = "marginal" if entry.get("method") == "estimated" else None  # S18
+    as_of = ""
+    if not rel.newest:
+        day = R.day_of(entry.get("as_of"))
+        if day is None:
+            m = R.RELEASE_ID_RE.fullmatch(str(rel.catalog.get("release_id") or ""))
+            day = date(int(m["day"][:4]), int(m["day"][4:6]), int(m["day"][6:])) if m else None
+        as_of = _as_of(day or R.day_of(rel.catalog.get("created_at")))
+    forms = _forms(head, is_name, _nb_value(q), status, as_of)
+    return forms, {"name": name, "subject": subject, "status": status}
+
+
+def _render_slot(s: _Slot, ctx: _Ctx, names: dict[str, str]) -> _Out:
+    if s.kind == "name":
+        if s.entity_id not in names:
+            raise _Fail(f"{R_UNKNOWN_SLOT}: no ad {s.entity_id} with a display name")
+        name = names[s.entity_id]
+        return _Out({"full": name, "start": name}, None, None)
+    if s.run_id is not None:
+        run = ctx.run(s.run_id)
+        if isinstance(run, str):
+            raise _Fail(run)
+        _check_client(str(run.snap.client_id), ctx.client_id, f"run {s.run_id}")
+        if s.kind == "cmp":
+            forms, quantity = _cmp(run, names)
+            return _Out(forms, quantity, run.newest, run_id=s.run_id)
+        q = next((q for q in run.snap.quantities if q.quantity_id == s.quantity_id), None)
+        if q is None:
+            raise _Fail(f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_id} in run {s.run_id}")
+        level = q.scope.level
+        subject = "account" if level == "account" else q.scope.ids.get(level, "account")
+        quantity: SlotQuantity = {
+            "name": str(q.name),
+            "subject": str(subject),
+            "status": q.feasibility.status,
+        }
+        return _Out(_run_fig(run, q, names), quantity, run.newest, run_id=s.run_id)
+    assert s.release_id is not None
+    claimed = R.client_of_release_id(s.release_id)
+    rel = ctx.release(s.release_id)
+    if isinstance(rel, str):
+        if claimed is not None and claimed != ctx.client_id:
+            raise _Fail(f"{R_OTHER_CLIENT}: release {s.release_id}; {rel}")
+        raise _Fail(rel)
+    _check_client(rel.client, ctx.client_id, f"release {s.release_id}")
+    entry = next((e for e in rel.entries if e.get("entry_id") == s.entry_id), None)
+    if entry is None:
+        raise _Fail(f"{R_UNKNOWN_SLOT}: entry {s.entry_id} is not in release {s.release_id}")
+    quantities = entry.get("quantities") or []
+    q = next(
+        (q for q in quantities if isinstance(q, dict) and q.get("name") == s.quantity_name), None
+    )
+    if q is None:
+        raise _Fail(
+            f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_name} in entry {s.entry_id} "
+            f"of release {s.release_id}"
+        )
+    forms, quantity = _nb_fig(rel, entry, q, names, ctx.kind)
+    return _Out(forms, quantity, rel.newest, release_id=s.release_id)
+
+
+def _needed_ids(slots: list[_Slot], ctx: _Ctx) -> set[str]:
+    """The entity ids whose names the slots render."""
+    ids: set[str] = set()
+    for s in slots:
+        if s.kind == "name" and s.entity_id:
+            ids.add(s.entity_id)
+        elif s.run_id is not None:
+            run = ctx.run(s.run_id)
+            if not isinstance(run, _Run):
+                continue
+            if s.kind == "cmp" and run.snap.comparison is not None and run.snap.comparison.p_best:
+                ids.add(max(run.snap.comparison.p_best.items(), key=lambda kv: (kv[1], kv[0]))[0])
+            for q in run.snap.quantities:
+                if q.quantity_id == s.quantity_id and q.scope.level != "account":
+                    ids.add(str(q.scope.ids.get(q.scope.level, "")))
+    ids.discard("")
+    return ids
+
+
+# --- the lint (C1, A4) -----------------------------------------------------------------------
+
+_SENT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_ZERO_OR_ALL = ("no", "none", "all", "every")
+_MEASURE_WORDS = (
+    "click",
+    "clicks",
+    "link click",
+    "link clicks",
+    "sign up",
+    "sign ups",
+    "signup",
+    "signups",
+    "lead",
+    "leads",
+    "spend",
+    "spends",
+    "spent",
+    "spending",
+    "impression",
+    "impressions",
+    "conversion",
+    "conversions",
+    "order",
+    "orders",
+    "purchase",
+    "purchases",
+)
+
+
+def _measure_phrases() -> tuple[str, ...]:
+    out = set(_MEASURE_WORDS)
+    for kind in ("purchase", "lead"):
+        lab, ali = V.labels(kind)
+        out |= {R.norm_name(x) for x in lab.values()}
+        out |= {R.norm_name(a) for aliases in ali.values() for a in aliases}
+    return tuple(sorted(x for x in out if x))
+
+
+def _has_phrase(norm: str, phrases: tuple[str, ...] | list[str]) -> str | None:
+    for p in phrases:
+        if re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", norm):
+            return p
+    return None
+
+
+def _lexicon_hits(low: str, phr: dict[str, Any]) -> list[str]:
+    """check.py's comparative and causal lexicons, stems matching every inflection, less the
+    generic phrases that are never comparatives."""
+    lex, cau = phr["comparative_lexicon"], phr["causal_lexicon"]
+    generic = G5._lex_hits(low, lex.get("generic_phrases", []))
+    entries = [*lex["comparative"], *lex["superlative"], *cau["plain"], *cau["incremental"]]
+    return [
+        low[a:b]
+        for a, b, _ in G5._lex_hits(low, entries)
+        if not any(g0 <= a and b <= g1 for g0, g1, _ in generic)
+    ]
+
+
+def _lint(masked: str, slots: list[_Slot], rows: list[SlotOut], names: dict[str, str]) -> list[str]:
+    """C1 and A4 on the text with each slot as one placeholder character."""
+    phr = V.phrasing()
+    measures = _measure_phrases()
+    names_ad: set[str] = set()
+    for i, (s, row) in enumerate(zip(slots, rows, strict=True)):
+        q = row["quantity"]
+        if s.kind == "name" or (
+            s.kind == "fig" and q is not None and q["subject"] not in ("account", "")
+        ):
+            names_ad.add(_placeholder(i))
+    name_words = [
+        w for w in (R.norm_name(re.sub(r"[.!?,;:]+$", "", n.strip())) for n in names.values()) if w
+    ]
+    by_ph = {_placeholder(i): s.token for i, s in enumerate(slots)}
+    out: list[str] = []
+    for sent in _SENT_RE.split(masked):
+        if not sent.strip():
+            continue
+        shown = "".join(by_ph.get(c, c) for c in sent).strip()
+        plain = "".join(" " if c in by_ph else c for c in sent)
+        low = plain.lower().replace("\u2019", "'")
+        norm = R.norm_name(plain)
+        names_an_ad = any(c in names_ad for c in sent) or _has_phrase(norm, name_words)
+        if names_an_ad:
+            for word in dict.fromkeys(_lexicon_hits(low, phr)):
+                out.append(f"{R_COMPARATIVE}: {word!r} in {shown!r}")
+        zero = [w for w in _ZERO_OR_ALL if re.search(rf"(?<!\w){w}(?!\w)", norm)]
+        measure = _has_phrase(norm, measures)
+        if zero and measure:
+            out.append(f"{R_ZERO_OR_ALL}: {zero[0]!r} with {measure!r} in {shown!r}")
+    return out
+
+
+def _placeholder(i: int) -> str:
+    return chr(0xF0000 + i)  # plane 15 private use: category Co, no letter, digit or sign
+
+
+# --- the calls -------------------------------------------------------------------------------
+
+
+def _ctx(
+    client_id: str,
+    load_run: LoadRun | None,
+    load_release: LoadRelease | None,
+    load_names: LoadNames | None,
+) -> _Ctx:
+    return _Ctx(
+        client_id,
+        load_run or R.default_load_run,
+        load_release or R.default_load_release,
+        load_names or R.default_load_names,
+    )
+
+
+def _engine_version() -> str:
+    from bayesian_marketing import __version__
+
+    return f"bayesian-marketing {__version__}"
 
 
 def client_slots(
@@ -164,7 +896,78 @@ def client_slots(
 ) -> Menu:
     """J4R menu (C3): every slot the engine can render for the client's newest run and newest
     notebook release, each with both forms rendered."""
-    raise NotImplementedError
+    if not isinstance(client_id, str):
+        raise TypeError("client_slots: client_id must be a str")
+    ctx = _ctx(client_id, load_run, load_release, load_names)
+    reasons: list[str] = []
+    items: list[MenuItem] = []
+    run_id, run = ctx.newest_run()
+    rel_id, rel = ctx.newest_release()
+    for got in (run, rel):
+        if isinstance(got, str):
+            reasons.append(got)
+    candidates: list[_Slot] = []
+    if isinstance(run, _Run) and run.snap.client_id == client_id:
+        for q in run.snap.quantities:
+            candidates.append(_parse_slot(f"{{fig:run/{run_id}/{q.quantity_id}}}", 0, 0))
+        if run.snap.comparison is not None:
+            candidates.append(_parse_slot(f"{{cmp:run/{run_id}}}", 0, 0))
+    if isinstance(rel, _Release) and rel.client == client_id:
+        for e in rel.entries:
+            for q in e.get("quantities") or []:
+                if isinstance(q, dict) and q.get("name"):
+                    candidates.append(
+                        _parse_slot(f"{{fig:nb/{rel_id}/{e.get('entry_id')}/{q['name']}}}", 0, 0)
+                    )
+    ads: list[str] = []
+    if isinstance(run, _Run) and run.snap.client_id == client_id:
+        ad_ids = [str(v) for v in run.snap.variants.values()]
+        ad_ids += [str(q.scope.ids["ad"]) for q in run.snap.quantities if q.scope.level == "ad"]
+        ads = list(dict.fromkeys(ad_ids))
+    fig_slots = [s for s in candidates if s.kind is not None]
+    names = ctx.names(_needed_ids(fig_slots, ctx) | set(ads))
+    reasons += ctx.names_reasons
+    for s in fig_slots:
+        try:
+            out = _render_slot(s, ctx, names)
+        except _Fail:
+            continue
+        q = out.quantity
+        items.append(
+            {
+                "token": s.token,
+                "kind": s.kind,  # type: ignore[typeddict-item]
+                "measure": q["name"] if q else None,
+                "subject": q["subject"] if q else None,
+                "status": q["status"] if q else None,
+                "newest": bool(out.newest),
+                "run_id": out.run_id,
+                "release_id": out.release_id,
+                "forms": dict(out.forms),
+            }
+        )
+    for eid in ads:
+        if eid in names:
+            items.append(
+                {
+                    "token": f"{{name:ad/{eid}}}",
+                    "kind": "name",
+                    "measure": None,
+                    "subject": eid,
+                    "status": None,
+                    "newest": True,
+                    "run_id": run_id,
+                    "release_id": None,
+                    "forms": {"full": names[eid], "start": names[eid]},
+                }
+            )
+    return {
+        "client_id": client_id,
+        "slots": items,
+        "reasons": reasons,
+        "engine_version": _engine_version(),
+        "checked_at": utcnow().isoformat(),
+    }
 
 
 def render_client_text(
@@ -178,4 +981,85 @@ def render_client_text(
     """J4R render: every slot rendered whole, the numeral rule applied to what is left, the
     comparative lint run. Every ref must belong to ``client_id`` (A1). ``ok`` False gives ``text``
     None. Only a wrong argument type raises."""
-    raise NotImplementedError
+    if not isinstance(text, str):
+        raise TypeError("render_client_text: text must be a str")
+    if not isinstance(client_id, str):
+        raise TypeError("render_client_text: client_id must be a str")
+    ctx = _ctx(client_id, load_run, load_release, load_names)
+    reasons: list[str] = []
+
+    slots = [_parse_slot(m.group(0), m.start(), m.end()) for m in _SLOT_RE.finditer(text)]
+    parts, pos = [], 0
+    for i, s in enumerate(slots):
+        parts += [text[pos : s.start], _placeholder(i)]
+        pos = s.end
+    masked = "".join(parts) + text[pos:]
+    stripped = "".join(" " if 0xF0000 <= ord(c) < 0x100000 else c for c in masked)
+
+    good = [s for s in slots if s.kind is not None and not s.reasons]
+    names = ctx.names(_needed_ids(good, ctx))
+    rows: list[SlotOut] = []
+    rendered: list[str | None] = []
+    clients: list[str] = []
+    for s in slots:
+        out: _Out | None = None
+        if s.kind is not None and not s.reasons:
+            if s.kind == "date":
+                out = _Out({"full": s.token, "start": s.token}, None, None)
+            else:
+                try:
+                    out = _render_slot(s, ctx, names)
+                except _Fail as exc:
+                    s.reasons.append(str(exc))
+        if s.run_id is not None and isinstance(ctx.runs.get(s.run_id), _Run):
+            clients.append(str(ctx.runs[s.run_id].snap.client_id))  # type: ignore[union-attr]
+        if s.release_id is not None and isinstance(ctx.releases.get(s.release_id), _Release):
+            clients.append(ctx.releases[s.release_id].client)  # type: ignore[union-attr]
+        rows.append(
+            {
+                "token": s.token,
+                "ok": out is not None,
+                "rendered": out.forms[s.form] if out is not None else None,
+                "ref": s.ref,
+                "claim_id": s.claim_id,
+                "run_id": s.run_id,
+                "release_id": s.release_id,
+                "quantity": out.quantity if out is not None else None,
+                "newest": out.newest if out is not None else None,
+                "reasons": list(s.reasons),
+            }
+        )
+        rendered.append(out.forms[s.form] if out is not None else None)
+        reasons += [f"{s.token}: {r}" for r in s.reasons]
+
+    distinct = list(dict.fromkeys(clients))
+    if len(distinct) > 1:
+        reasons.append(f"{R_TWO_CLIENTS}: {', '.join(distinct)}")
+    reasons += ctx.names_reasons
+    if "{" in stripped or "}" in stripped:
+        left = "".join(c for c in stripped if c in "{}")
+        reasons.append(f"{R_BRACE}: {left!r}")
+    for hit in _numeral_hits(stripped):
+        reasons.append(f"{R_FIGURE_OUTSIDE_SLOT}: {hit!r}")
+    lint = _lint(masked, slots, rows, names)
+    reasons += lint
+
+    ok = not reasons and all(r["ok"] for r in rows)
+    out_text = None
+    if ok:
+        pieces, pos = [], 0
+        for s, r in zip(slots, rendered, strict=True):
+            pieces += [text[pos : s.start], r or ""]
+            pos = s.end
+        out_text = "".join(pieces) + text[pos:]
+    return {
+        "ok": ok,
+        "text": out_text,
+        "template": text,
+        "slots": rows,
+        "reasons": reasons,
+        "lint": lint,
+        "engine_version": _engine_version(),
+        "inputs_hash": inputs_hash({"text": text, "client_id": client_id}),
+        "checked_at": utcnow().isoformat(),
+    }
