@@ -93,6 +93,8 @@ class ClientConfig(Frozen):
     conversion_event: dict[Platform, str] = Field(default_factory=dict)
     conversion_event_confirmed: dict[Platform, bool] = Field(default_factory=dict)
     priors: dict[str, str] = Field(default_factory=dict)
+    # J4R.1: AtmaOS's id for the client, so a caller holding only that id finds this config.
+    atmaos_client_id: str | None = None
 
 
 class NarrativeBlock(Frozen):
