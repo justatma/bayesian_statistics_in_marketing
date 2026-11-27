@@ -544,3 +544,30 @@ L2, then L3 with L4); facts pack F2b and reviews on Sonnet; 250,000 tokens per a
 5. Every other reader of a poll's rows or window is audited and named in the build log, for example the live view's tables, the prior score and the spend-to-date query. Each one either keeps showing the analysis window, which is the default, or is shown to need the full read.
 6. Checks: (a) a fixture poll of 28 days gives a run whose window is its last 7, and whose quantities equal a run on a 7-day poll of the same last 7 days (same seed inputs aside). (b) The run's row_keys hold only dates in its window, and equal a fresh export's for that run. (c) A registry with analysis_days above lookback_days fails to load. (d) Pre-L12 runs export the same row_keys and rows_sha256 as before. (e) A restated day 20 days back becomes a new version in the store, while the run's pointer is unchanged unless the day is in its window. (f) The whole suite passes.
 7. Follow-up M1, recorded, due when the store holds 28 days of versions for every day of a 28-day span (the Principal Architect's observation, 27 Nov). With "read 28, analyse 7", the engine estimates from the seven least mature days, whose sign-ups are still being credited back to their click dates under `1d_view_7d_click_1d_ev`. So the sign-up rate may read low and the cost per sign-up high, by however much a day still grows. M1 measures that growth from the stored versions: for each closed day, the sign-up count at first close against the count at its latest version, at 1, 3, 7 and 28 days after close, by ad and for the account. If the growth is small, record the figure here and close M1. If it isn't, the choice is between a correction in the model and a caveat the renderer attaches to sign-up figures, "recent days are still filling in". That is a design to put to the owner, not one to build without him. D53's "a lead is counted when it happens" is the ruling this would revisit.
+
+### L12, settled after the blind spec review (27 Nov; 5 major, 4 minor, none blocking)
+
+L12.1 The readers, one by one:
+- `refresh._outcome` filters `store.rows(poll_id)` to the analysis window first. `ads`, the `ONE_AD` test, `_manifest` (`entity_map`, `attribution_window`, `currency`), `_pull` (its rows, its `window` set to the analysis window, `partial_truth`), `_entity_names`, `_entity_parents` and the horizon's `window_rows` all come from the filtered rows.
+- `horizon.spend_to_date` stays as it is, the one deliberate reader of every stored row.
+- `view.render` filters rows to the view's own last 7 days (today minus 6 to today), pinned at 7, before `_ads`, because its labels and `_periods` are fixed at 7.
+- `prior_score._merged_rows` stays all-history (R4). Its figures will shift as settled re-reads win per (ad, date), and `PriorScore.days` can widen. That is expected and recorded.
+- `claims/_refs.default_load_names` and `default_load_parents`, `rows.versioned`, `prune`, the `serve` health check and the CLI's "N rows" line are unaffected. `PollRecord.n_rows` and that CLI line count all 28 days.
+- `tests/unit/l0/test_l0.py` line 52, which pins `lookback_days == 7`, is amended on the record, along with this spec's §3.4, C1 and line 525.
+
+L12.2 The pointer has one function. `rows.pointer(rows, seen, poll_id, window=None)` filters the poll's keys to versions whose `describes` falls in `window`. `None` means no filter, which is today's behaviour. The refresh passes the run's window, and `export_history.runs()` calls the same function with `tuple(d["window"])` instead of building keys inline. Every run on the store today has its window equal to its poll's, so pre-L12 runs export byte for byte.
+
+L12.3 Seeds and hashes. The manifest id and, for the same `at`, the run id's inputs other than the horizon don't change. The horizon reads `spend_to_date`, which sees the wider re-read's restated spend, so the horizon, and with it the seed, run id and config hash, can move. That is real data and intended. `live.yaml`'s `version` and `freshness_date` are bumped to 2026-11-27 for D55, so every new run's config hash changes once. Check (a) is rewritten below.
+
+L12.4 The window. The analysis window is `(max(poll.window[0], window_end - analysis_days + 1), window_end)`. It follows the stored poll's width, so a 7-day poll refreshed after the deploy gives its own 7 days.
+
+L12.5 Volume. A 28-day poll is about 10 to 14 Meta calls (25 rows a page; nothing caps below that) and about 330 KB recorded, against 80 KB today. Rows in the store grow about 4x, to about 4,500 a day, and `reads.jsonl` grows with them. The answer for exports is `--since`. Adding a page `limit` is left out because it would change the recorded replays. The "too much data" path on a later page, which today makes the poll an error, is held by a replay fixture of a multi-page 28-day pull, so it is seen if it happens.
+
+L12.6 Checks, replacing (a) and (e) and adding:
+- (a) A 28-day fixture poll whose days 8 to 28 carry an extra ad and a different attribution label, with the horizon pinned (the same stored spend), gives the same manifest, the same request key, the same seed, equal posterior summaries and the same config hash (registry version fixed) as a 7-day poll of the same last 7 days.
+- (a2) With the horizon not pinned, the run differs from (a) only through `spend_to_date`.
+- (e) A day restated 20 days back makes a new `v(n+1)` in `polls.jsonl` and `reads.jsonl`. The run made in that poll doesn't cite it. A day restated inside the window is cited. Earlier runs' pointers are byte-identical.
+- (g) The view's tables on a 28-day store equal its tables on the 7-day store of the same last week.
+- (h) The refresh and the export compute the pointer through `rows.pointer`.
+- (i) A pre-L12 7-day poll refreshes exactly as before.
+- (j) The multi-page 28-day replay.
