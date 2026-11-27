@@ -1,8 +1,8 @@
 #!/bin/sh
-# Removes the two live view launchd jobs. The store and recordings under data/live/ are kept.
+# Removes the live launchd jobs (poll, view, daily export). The store and recordings under data/live/ are kept.
 set -eu
 AGENTS="$HOME/Library/LaunchAgents"
-for job in live_poll live_view; do
+for job in live_poll live_view daily_export; do
   label="com.atma.bayes.$job"
   launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
   rm -f "$AGENTS/$label.plist"
