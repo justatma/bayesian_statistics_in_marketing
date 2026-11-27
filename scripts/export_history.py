@@ -70,7 +70,11 @@ BACKFILL_FIELDS = (
 
 
 def runs(
-    store: sqlite3.Connection, client_id: str, tz: str, poll_rows: list[dict], seen: dict[str, list[str]]
+    store: sqlite3.Connection,
+    client_id: str,
+    tz: str,
+    poll_rows: list[dict],
+    seen: dict[str, list[str]],
 ) -> list[dict]:
     record = sqlite3.connect(f"file:{LIVE / 'engine' / 'run_record.sqlite'}?mode=ro", uri=True)
     started = {}
@@ -80,7 +84,8 @@ def runs(
     poll_of = {
         r["run_id"]: r["poll_id"]
         for r in store.execute(
-            "SELECT run_id, poll_id FROM refreshes WHERE client_id = ? AND run_id IS NOT NULL", (client_id,)
+            "SELECT run_id, poll_id FROM refreshes WHERE client_id = ? AND run_id IS NOT NULL",
+            (client_id,),
         )
     }
     out = []
@@ -90,42 +95,44 @@ def runs(
             continue
         # L12.2: the versions the run's poll read for dates in the run's window
         keys, sha = pointer(poll_rows, seen, poll_of.get(d["run_id"]), tuple(d["window"]))
-        out.append({
-            "key": d["run_id"],
-            "describes": {"start": d["window"][0], "end": d["window"][1]},
-            "known_at": started.get(d["run_id"]),
-            "timezone": tz,
-            "poll_id": poll_of.get(d["run_id"]),
-            "row_keys": keys,
-            "rows_form": ROWS_FORM,
-            "rows_sha256": sha,
-            "account": None,
-            "metric": d["metric"],
-            "horizon": d.get("horizon"),
-            "tool_version": d.get("tool_version"),
-            "config_hash": d.get("config_hash"),
-            "quantities": [
-                {
-                    "quantity_id": q["quantity_id"],
-                    "name": q["name"],
-                    "ad": q["scope"]["ids"].get("ad"),
-                    "window": q["scope"].get("window"),
-                    "summary": q["estimate"]["summary"],
-                    "family": q["estimate"].get("family"),
-                    "params": q["estimate"].get("params"),
-                    "feasibility": q["feasibility"],
-                    "data_pull_ids": q.get("provenance", {}).get("data_pull_ids"),
-                }
-                for q in d["quantities"]
-            ],
-            "not_estimable": d.get("not_estimable"),
-            "comparison": d.get("comparison"),
-            "decision": d.get("decision"),
-            "recommendations": d.get("recommendations"),
-            "gate_results": d.get("gate_results"),
-            "knowability": d.get("knowability"),
-            "notices": d.get("notices"),
-        })
+        out.append(
+            {
+                "key": d["run_id"],
+                "describes": {"start": d["window"][0], "end": d["window"][1]},
+                "known_at": started.get(d["run_id"]),
+                "timezone": tz,
+                "poll_id": poll_of.get(d["run_id"]),
+                "row_keys": keys,
+                "rows_form": ROWS_FORM,
+                "rows_sha256": sha,
+                "account": None,
+                "metric": d["metric"],
+                "horizon": d.get("horizon"),
+                "tool_version": d.get("tool_version"),
+                "config_hash": d.get("config_hash"),
+                "quantities": [
+                    {
+                        "quantity_id": q["quantity_id"],
+                        "name": q["name"],
+                        "ad": q["scope"]["ids"].get("ad"),
+                        "window": q["scope"].get("window"),
+                        "summary": q["estimate"]["summary"],
+                        "family": q["estimate"].get("family"),
+                        "params": q["estimate"].get("params"),
+                        "feasibility": q["feasibility"],
+                        "data_pull_ids": q.get("provenance", {}).get("data_pull_ids"),
+                    }
+                    for q in d["quantities"]
+                ],
+                "not_estimable": d.get("not_estimable"),
+                "comparison": d.get("comparison"),
+                "decision": d.get("decision"),
+                "recommendations": d.get("recommendations"),
+                "gate_results": d.get("gate_results"),
+                "knowability": d.get("knowability"),
+                "notices": d.get("notices"),
+            }
+        )
     return out
 
 
@@ -142,8 +149,17 @@ def _get(path: str, token: str, **params) -> list[dict]:
 
 def backfill(account: str, before: str, token: str, read_at: str, tz: str) -> list[dict]:
     rows = _get(
-        f"act_{account}/insights", token, level="ad", fields=BACKFILL_FIELDS, time_increment=1,
-        time_range=json.dumps({"since": "2026-01-01", "until": (date.fromisoformat(before) - timedelta(days=1)).isoformat()}),
+        f"act_{account}/insights",
+        token,
+        level="ad",
+        fields=BACKFILL_FIELDS,
+        time_increment=1,
+        time_range=json.dumps(
+            {
+                "since": "2026-01-01",
+                "until": (date.fromisoformat(before) - timedelta(days=1)).isoformat(),
+            }
+        ),
         limit=500,
     )
     return [
@@ -153,8 +169,10 @@ def backfill(account: str, before: str, token: str, read_at: str, tz: str) -> li
             "describes": r["date_start"],
             "known_at": read_at,
             "timezone": tz,
-            "account": r.get("account_id"), "campaign": r.get("campaign_id"),
-            "ad_set": r.get("adset_id"), "ad": r.get("ad_id"),
+            "account": r.get("account_id"),
+            "campaign": r.get("campaign_id"),
+            "ad_set": r.get("adset_id"),
+            "ad": r.get("ad_id"),
             "meta": r,
         }
         for r in rows
@@ -177,9 +195,11 @@ def _unsigned(r: dict) -> dict:
 
 def changes(account: str, token: str, read_at: str, tz: str) -> list[dict]:
     rows = _get(
-        f"act_{account}/activities", token,
+        f"act_{account}/activities",
+        token,
         fields="event_type,event_time,object_id,object_name,object_type,extra_data,translated_event_type",
-        since="2026-01-01", limit=500,
+        since="2026-01-01",
+        limit=500,
     )
     return [
         {
@@ -202,9 +222,15 @@ def main(client_id: str, since: str | None = None) -> Path:
     read_at = now.isoformat(timespec="seconds")
     out = LIVE / "exports" / client_id / now.strftime("%Y%m%dT%H%M%SZ")
     out.mkdir(parents=True)
-    zones = {r[0] for r in store.execute(
-        "SELECT DISTINCT o.timezone FROM poll_outcomes o JOIN polls p USING (poll_id) "
-        "WHERE p.client_id = ? AND o.status = 'ok'", (client_id,)) if r[0]}
+    zones = {
+        r[0]
+        for r in store.execute(
+            "SELECT DISTINCT o.timezone FROM poll_outcomes o JOIN polls p USING (poll_id) "
+            "WHERE p.client_id = ? AND o.status = 'ok'",
+            (client_id,),
+        )
+        if r[0]
+    }
     if len(zones) != 1:
         raise RuntimeError(f"expected one account time zone, found {sorted(zones)}")
     tz = zones.pop()
@@ -213,16 +239,25 @@ def main(client_id: str, since: str | None = None) -> Path:
         poll_rows, seen, reads = versioned(live, client_id)
     finally:
         live.close()
-    files = {"polls.jsonl": poll_rows, "runs.jsonl": runs(store, client_id, tz, poll_rows, seen),
-             "reads.jsonl": sorted(reads, key=lambda r: r["key"])}
-    account = store.execute(
-        "SELECT account_id FROM polls WHERE client_id = ? LIMIT 1", (client_id,)
-    ).fetchone()["account_id"].removeprefix("act_")
-    first = store.execute("SELECT min(date) FROM rows WHERE client_id = ?", (client_id,)).fetchone()[0]
+    files = {
+        "polls.jsonl": poll_rows,
+        "runs.jsonl": runs(store, client_id, tz, poll_rows, seen),
+        "reads.jsonl": sorted(reads, key=lambda r: r["key"]),
+    }
+    account = (
+        store.execute("SELECT account_id FROM polls WHERE client_id = ? LIMIT 1", (client_id,))
+        .fetchone()["account_id"]
+        .removeprefix("act_")
+    )
+    first = store.execute(
+        "SELECT min(date) FROM rows WHERE client_id = ?", (client_id,)
+    ).fetchone()[0]
     token = os.environ.get("META_ACCESS_TOKEN")
     skipped = []
     if token:
-        files["backfill.jsonl"] = [] if since and since >= first else backfill(account, first, token, read_at, tz)
+        files["backfill.jsonl"] = (
+            [] if since and since >= first else backfill(account, first, token, read_at, tz)
+        )
         files["changes.jsonl"] = changes(account, token, read_at, tz)
     else:
         skipped = ["backfill.jsonl", "changes.jsonl"]
@@ -231,10 +266,19 @@ def main(client_id: str, since: str | None = None) -> Path:
         files["reads.jsonl"] = [r for r in files["reads.jsonl"] if r["describes"] >= since]
         files["runs.jsonl"] = [r for r in files["runs.jsonl"] if r["describes"]["end"] >= since]
         if "changes.jsonl" in files:
-            files["changes.jsonl"] = [r for r in files["changes.jsonl"] if r["describes"][:10] >= since]
-    manifest = {"client_id": client_id, "written_at": read_at, "store_first_day": first,
-                "timezone": tz, "since": since, "rows_form": ROWS_FORM,
-                "skipped_without_token": skipped, "files": {}}
+            files["changes.jsonl"] = [
+                r for r in files["changes.jsonl"] if r["describes"][:10] >= since
+            ]
+    manifest = {
+        "client_id": client_id,
+        "written_at": read_at,
+        "store_first_day": first,
+        "timezone": tz,
+        "since": since,
+        "rows_form": ROWS_FORM,
+        "skipped_without_token": skipped,
+        "files": {},
+    }
     for name, rows in files.items():
         body = b"".join(canonical(r) + b"\n" for r in rows)
         if token and token.encode() in body:
