@@ -24,7 +24,7 @@ Every key below is required, and a value may be null only where the table says s
 | `outcome` | dict | Not read. It is AtmaOS's rule over its records. |
 | `direction` | `more` or `fewer` | The sign of the effect. |
 | `horizon_days` | int ≥ 0 | How long after exposure the outcome is looked for. |
-| `baseline_rate` | number in [0, 1], or null | The control's rate. Null or 0 means there is no outcome (rule 6). A value above 1 or below 0, or NaN, is refused. |
+| `baseline_rate` | number in [0, 1], or null | The control's rate. Null, 0 or 1 means there is no usable baseline (rule 6, J6.S1). A value above 1 or below 0, or NaN, is refused. |
 | `smallest_effect` | number > 0, finite | The relative change worth detecting. |
 | `false_positive_rate`, `sensitivity` | numbers in (0, 1) | alpha and power. |
 | `randomized`, `holdout` | bool | See rules 8 and 13. |
@@ -34,6 +34,7 @@ Every key below is required, and a value may be null only where the table says s
 | `period_days` | int ≥ 1 | The length of one period. |
 | `kill_candidates` | list of str | Not read. The early-ending metric is named at AtmaOS's `agree`. |
 | `economics_ref`, `value_per_outcome`, `run_id` | str, number or str, each or null | Accepted and not used in J6 (see Not in J6). |
+| `baseline_measure_id` | str or null | The AtmaOS measure the baseline came from. Accepted and not used (J6.S1). |
 
 ## What "estimable" means for a design
 
@@ -50,7 +51,7 @@ So for a design, `estimable` means powered to detect `smallest_effect`, the chan
 3. Sizes. `units_needed` = N(`smallest_effect`). `units_needed_marginal` = N(`smallest_effect` × ratio). The marginal size is solved from the formula at the larger effect, not scaled. Where the larger effect puts p2 outside (0, 1), `units_needed_marginal` is null and no design can be `marginal`.
 4. The word. "Reaches" always means ≥. The design is `estimable` when `units_available` ≥ `units_needed`. It is `marginal` when `units_needed_marginal` is not null and `units_available` ≥ `units_needed_marginal`. Otherwise it is `below_floor`, which AtmaOS stores as `not_knowable_yet`.
 5. Zero units. A `units_available` of 0, with a usable baseline, gives `below_floor` with the sizes computed.
-6. No outcome. A `baseline_rate` that is null or 0, or a p2 at `smallest_effect` outside (0, 1), gives `below_floor`. Every size, `periods_needed`, `stopping_rule` and `remedy` are then null. The second case, for example `more` at a baseline of 0.9 with an effect of 0.2, has an outcome but an effect that can't be seen. The sizes can't be computed, so it reads the same way.
+6. No outcome. A `baseline_rate` that is null, 0 or 1, or a p2 at `smallest_effect` outside (0, 1), gives `below_floor`. Every size, `periods_needed`, `stopping_rule` and `remedy` are then null. The second case, for example `more` at a baseline of 0.9 with an effect of 0.2, has an outcome but an effect that can't be seen. The sizes can't be computed, so it reads the same way.
 7. A note for AtmaOS. Its interim replay rule, "marginal at half", is close to this but not the same. Solved from the formula, the marginal size runs to about 0.24 to 0.28 of `units_needed` across common baselines and effects. The interim rule's figures for E1 change: see the AS5 section below.
 8. Not randomized. `randomized` false gives `below_floor`. The sizes and periods are computed as if the design were randomized, and `remedy` is null. The engine's remedies are size and shape only, and assignment is for the CIE and AtmaOS to change.
 
@@ -158,3 +159,12 @@ E1's figures change.
 (m) The registry. A fixture registry with another ratio changes `units_needed_marginal` through rule 3, and another `max_periods` moves the `longer_run` edge.
 
 (n) The function reads no file under `data_dir()`, no store and no notebook.
+
+## Settled after the Arkwright Engineer's reading (27 Nov)
+
+J6.S1.
+1. `baseline_measure_id` (str or null) is accepted and not used. AtmaOS sends every request field, so it joins the contract. The adapter then doesn't have to strip it, and the unknown-key refusal still guards against drift.
+2. A `baseline_rate` of exactly 1 reads like 0, as no usable baseline: at p1 = 1, p1(1 − p1) = 0 and the formula's variance is zero.
+3. `stopping_rule` is never sent with `max_periods` null. It is null as a whole whenever `periods_needed` is null (rule 12).
+4. AtmaOS rounds cost half up to cents, as rule 13 does.
+5. AtmaOS stores `units_needed_marginal`, `rule_ref` and `inputs_hash`, and leaves out `cost_low`, `cost_high` and `unit_kind`, which in J6 only repeat what it holds. That is AtmaOS's choice, and it changes nothing here.
