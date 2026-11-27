@@ -15,6 +15,8 @@ class LiveRegistry(Frozen):
     freshness_date: str
     interval_seconds: int = Field(gt=0)
     lookback_days: int = Field(ge=1)
+    # L12 (D55): the engine's analysis window, the last analysis_days of the poll; <= lookback_days
+    analysis_days: int = Field(default=7, ge=1)
     stale_after_seconds: int = Field(gt=0)
     recordings_keep_days: int = Field(ge=1)
     page_refresh_seconds: int = Field(gt=0)

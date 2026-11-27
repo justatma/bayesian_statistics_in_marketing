@@ -109,10 +109,16 @@ def versioned(store: Store, client_id: str) -> Versioned:
 
 
 def pointer(
-    rows: list[dict[str, Any]], seen: dict[str, list[str]], poll_id: str
+    rows: list[dict[str, Any]],
+    seen: dict[str, list[str]],
+    poll_id: str,
+    window: tuple[str, str] | None = None,
 ) -> tuple[list[str], str]:
     """The run pointer for a poll: ``(row_keys, rows_sha256)`` over the versions that poll read.
-    A poll with no rows gives ``([], sha256(b""))``."""
+    A poll with no rows gives ``([], sha256(b""))``. L12.2: ``window`` (ISO dates, inclusive)
+    keeps only versions whose ``describes`` falls in it; None keeps all (to build)."""
+    if window is not None:
+        raise NotImplementedError
     keys = list(seen.get(poll_id, []))
     by_key = {r["key"]: r for r in rows}
     return keys, rows_sha256([by_key[k] for k in keys])
