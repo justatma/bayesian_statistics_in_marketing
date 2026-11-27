@@ -126,7 +126,12 @@ QUANTITY_WORDS: tuple[str, ...] = (
     "single",
     "sole",
 )
-QUANTITY_PHRASES: tuple[str, ...] = ("a pair of", "a number of", "the bulk of")
+QUANTITY_PHRASES: tuple[str, ...] = (
+    "a pair of",
+    "a number of",
+    "the bulk of",
+    "order of magnitude",
+)
 PERCENT_WORDS: tuple[str, ...] = ("percent", "per cent", "pct", "percentage", "basis point")
 PERCENT_SIGNS: tuple[str, ...] = ("%", "\u2030", "\uff05", "\u066a")  # % per-mille fullwidth arabic
 #: Determiners that stay allowed though they speak of how many (C2).
