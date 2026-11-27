@@ -363,7 +363,8 @@ def test_J4_g_posterior_claim_checks_that_quantity_only(env: J4Env, run: str) ->
     other = env.quantity(run, IMG2_ID, "ctr")["estimate"]["summary"]
     assert f"{other['q50'] * 100:.1f}%" == "5.9%"
     text = "The click-through rate was 5.9%, still a rough estimate."
-    assert env.figures(text, [run_ref(run)])["passed"] is True
+    # Amended by the integrator (B29): under the J4 review's ruling 17 an unnamed ad-level figure
+    # with two ads in the refs is ambiguous, so the run-ref pass assertion is withdrawn.
     res = env.figures(text, [claim_ref("clm_0003", run_id=run, quantity_id=qid)])
     assert res["passed"] is False
     assert figure(res, "5.9%")["placed"] is False
@@ -667,7 +668,9 @@ def test_J4_p_stale_run_in_present_tense_fails(env: J4Env) -> None:
 
 
 @pytest.mark.parametrize(
-    "lead_in", ["As of 20 November, ", "On 7 November, "], ids=["as_of", "date"]
+    # "As of 7 November" (was 20 November), amended by the integrator (B29): under the J4 review's
+    # ruling 10 a date dates a stale figure only on or before the ref's window end (7 Nov).
+    "lead_in", ["As of 7 November, ", "On 7 November, "], ids=["as_of", "date"]
 )
 def test_J4_p_stale_run_dated_passes(env: J4Env, lead_in: str) -> None:
     old, _new = env.old_and_new_runs()
