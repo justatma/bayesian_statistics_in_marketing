@@ -289,16 +289,60 @@ def source_names(sources: list[Any]) -> dict[str, str]:
 
 
 def merge_names(layers: list[dict[str, str]]) -> dict[str, str]:
-    """S16: the snapshot's names, then the notebook sources', then the store's, first wins; a
-    name that maps to two ids is treated as unnamed."""
+    """S16 by rank: the snapshot's names, then the notebook sources', then the store's, the first
+    to name an id wins. A name that a layer gives two ids is unnamed for both; a lower layer's
+    name equal to one a higher layer already gave another id is dropped (the higher one stays)."""
     merged: dict[str, str] = {}
+    taken: dict[str, str] = {}  # normalised name -> id
+    blocked: set[str] = set()
     for layer in layers:
+        by_name: dict[str, set[str]] = {}
         for eid, name in layer.items():
-            merged.setdefault(str(eid), str(name))
-    by_name: dict[str, set[str]] = {}
-    for eid, name in merged.items():
-        by_name.setdefault(norm_name(name), set()).add(eid)
-    return {eid: n for eid, n in merged.items() if len(by_name[norm_name(n)]) == 1}
+            by_name.setdefault(norm_name(str(name)), set()).add(str(eid))
+        for eid, name in layer.items():
+            eid, name = str(eid), str(name)
+            key = norm_name(name)
+            if eid in merged or eid in blocked:
+                continue
+            if len(by_name[key]) > 1:  # a higher layer's holder of the name keeps it
+                blocked.add(eid)
+                continue
+            if key in taken and taken[key] != eid:
+                continue
+            merged[eid] = name
+            taken[key] = eid
+    return merged
+
+
+#: meta_object ``object_type`` to a scope level (R17).
+OBJECT_LEVELS = {"ad": "ad", "adset": "ad_set", "ad_set": "ad_set", "campaign": "campaign"}
+
+
+def typed_source_names(sources: list[Any]) -> dict[str, tuple[str, str | None]]:
+    """Names from a release's meta_object sources, with the level their object type gives."""
+    out: dict[str, tuple[str, str | None]] = {}
+    for s in sources:
+        if not isinstance(s, dict) or s.get("kind") != "meta_object":
+            continue
+        sref, content = s.get("ref") or {}, s.get("content") or {}
+        if not isinstance(sref, dict) or not isinstance(content, dict):
+            continue
+        oid = sref.get("object_id") or content.get("id")
+        otype = str(sref.get("object_type") or "")
+        if oid and content.get("name") and otype != "account":
+            out.setdefault(str(oid), (str(content["name"]), OBJECT_LEVELS.get(otype)))
+    return out
+
+
+def client_release_ids(client_id: str) -> list[str]:
+    """Every release folder of the client, by (day, n)."""
+    from bayesian_marketing import notebook
+
+    folder = notebook.root() / client_id / "releases"
+    if not folder.is_dir():
+        return []
+    ids = [d.name for d in folder.iterdir() if d.is_dir() and RELEASE_ID_RE.fullmatch(d.name)]
+    return sorted(ids, key=release_key)
 
 
 def day_of(value: Any) -> date | None:

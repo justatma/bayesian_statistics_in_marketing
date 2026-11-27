@@ -13,6 +13,7 @@ from tests.acceptance.conftest import iso  # noqa: F401
 from tests.acceptance.j4_fixtures import CLIENT, IMG2_ID, IMG3, IMG3_ID
 from tests.acceptance.j4r_fixtures import J4REnv, cmp_run, fig_nb, fig_run, name_slot
 
+from bayesian_marketing.claims import slots as S
 from bayesian_marketing.notebook import release as nb_release
 
 pytestmark = pytest.mark.piece("J4R")
@@ -86,12 +87,18 @@ def _leak(env: J4REnv, text: str) -> None:
 def test_J4R_review2_roman_numeral_in_mixed_case_passes(env: J4REnv, run: str, text: str) -> None:
     """A Roman numeral in mixed case ("Xii") passes: the check needs all upper or all lower
     case, though A3 casefolds first."""
-    _leak(env, text)
+    # S26 (3) sets this differently: the plain-letter Roman numeral check is dropped, and
+    # Unicode numeral glyphs (Nl) are refused by the character allow list instead.
+    res = env.render(text)
+    assert res["ok"] is True, res["reasons"]
 
 
 def test_J4R_review2_roman_numeral_split_by_full_stops_passes(env: J4REnv, run: str) -> None:
     """ "X.I.I" is read as three one-letter words, so a Roman numeral with stops passes."""
-    _leak(env, "Round X.I.I went well.")
+    # S26 (3) sets this differently: the plain-letter Roman numeral check is dropped, and
+    # Unicode numeral glyphs (Nl) are refused by the character allow list instead.
+    res = env.render("Round X.I.I went well.")
+    assert res["ok"] is True, res["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -147,7 +154,10 @@ def test_J4R_review2_number_word_with_an_accent_passes(env: J4REnv, run: str, te
 
 def test_J4R_review2_letters_standing_for_digits_pass(env: J4REnv, run: str) -> None:
     """ "lOO" (l, O, O in ASCII letters) reads as 100 and passes."""
-    _leak(env, "Sign-ups rose by lOO.")
+    # The threat model (S26) sets this differently: the folds of S26 (2) do not catch this
+    # spelling, and spellings made to get past the rule are out of scope for review.
+    res = env.render("Sign-ups rose by lOO.")
+    assert res["ok"] is True, res["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -165,6 +175,12 @@ def test_J4R_review2_suffixed_number_words_outside_the_lists_pass(
     env: J4REnv, run: str, text: str
 ) -> None:
     """Number words with a suffix the lists lack ("zeroes", "fiftyish", "fiver") pass."""
+    # The threat model (S26) sets "zeroes", "tenner" and "fiver" differently: the folds of
+    # S26 (2) do not catch them, and spellings outside the list are out of scope for review.
+    if text in ("We got zeroes.", "It cost a tenner.", "It cost a fiver."):
+        res = env.render(text)
+        assert res["ok"] is True, res["reasons"]
+        return
     _leak(env, text)
 
 
@@ -189,6 +205,10 @@ def test_J4R_review2_name_that_states_a_figure_renders(env: J4REnv, run: str, na
     renders into the text: S25 (9) lets digits through and checks no glued or mixed-case form."""
     env.set_names(run, {IMG3_ID: name, IMG2_ID: "IMG2_TXT1"})
     res = env.render(f"{A} ran.")
+    if name == "Spring Xii":
+        # S26 (3) sets this differently: no plain-letter Roman numeral check, in names too.
+        assert res["ok"] is True, res["reasons"]
+        return
     assert refused(res), repr(res["text"])
 
 
@@ -234,16 +254,22 @@ def test_J4R_review2_p_best_as_a_ratio_unit_shows_certainty(env: J4REnv, run: st
     forbids for a probability."""
     rel = nb_one(env, {"name": "p_best", "value": 0.9996, "unit": "ratio"})
     res = env.render(f"{fig_nb(rel, EID, 'p_best')}.")
-    assert res["ok"], res["reasons"]
-    assert "100" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review2_p_best_in_percent_unit_shows_certainty(env: J4REnv, run: str) -> None:
     """A notebook p_best of 99.96 with unit "percent" renders "100.0%"."""
     rel = nb_one(env, {"name": "p_best", "value": 99.96, "unit": "percent"})
     res = env.render(f"{fig_nb(rel, EID, 'p_best')}.")
-    assert res["ok"], res["reasons"]
-    assert "100" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review2_negative_amount_that_rounds_to_zero_shows_minus_zero(
@@ -252,8 +278,11 @@ def test_J4R_review2_negative_amount_that_rounds_to_zero_shows_minus_zero(
     """An amount of -0.001 USD renders "-$0"."""
     rel = nb_one(env, {"name": "amount_spent", "value": -0.001, "unit": "USD"})
     res = env.render(f"{fig_nb(rel, EID, 'amount_spent')}.")
-    assert res["ok"], res["reasons"]
-    assert "-$0" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review2_negative_ratio_that_rounds_to_zero_shows_minus_zero(
@@ -262,8 +291,11 @@ def test_J4R_review2_negative_ratio_that_rounds_to_zero_shows_minus_zero(
     """A lift of -0.0004 (unit "ratio") renders "-0.0%"."""
     rel = nb_one(env, {"name": "lift", "value": -0.0004, "unit": "ratio"})
     res = env.render(f"{fig_nb(rel, EID, 'lift')}.")
-    assert res["ok"], res["reasons"]
-    assert "-0.0%" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 @pytest.mark.parametrize("value", [0.4, 1.4, 1.5])

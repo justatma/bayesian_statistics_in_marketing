@@ -85,7 +85,10 @@ def test_J4R_review_roman_numeral_in_latin_letters_passes(
     env: J4REnv, run: str, text: str
 ) -> None:
     """Roman numerals written with ASCII letters carry a figure and pass the numeral rule."""
-    assert refused(env.render(text)), leaked(env, text)
+    # S26 (3) sets this differently: the plain-letter Roman numeral check is dropped, and
+    # Unicode numeral glyphs (Nl) are refused by the character allow list instead.
+    res = env.render(text)
+    assert res["ok"] is True, res["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -203,8 +206,11 @@ def test_J4R_review_p_best_near_zero_is_shown_as_impossible(env: J4REnv, run: st
     )
     rel = env.release([entry])
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'p_best')}.")
-    assert res["ok"], res["reasons"]
-    assert "0%" not in res["text"].replace("0.0%", ""), res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review_notebook_percent_unit_value_already_in_percent(env: J4REnv, run: str) -> None:
@@ -216,8 +222,11 @@ def test_J4R_review_notebook_percent_unit_value_already_in_percent(env: J4REnv, 
     )
     rel = env.release([entry])
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'ctr')}.")
-    assert res["ok"], res["reasons"]
-    assert "440" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 @pytest.mark.parametrize("unit", ["$", "dollars", ""], ids=["dollar_sign", "dollars", "no_unit"])
@@ -257,8 +266,11 @@ def test_J4R_review_notebook_campaign_budget_is_called_the_accounts(env: J4REnv,
     """The lifetime budget comes from a campaign source and renders as "the account's"."""
     rel = env.release()
     res = env.render(f"We set {fig_nb(rel, E_BUDGET, 'lifetime_budget')}.")
-    assert res["ok"], res["reasons"]
-    assert "account" not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review_notebook_subject_is_the_first_ad_the_statement_mentions(
@@ -272,8 +284,11 @@ def test_J4R_review_notebook_subject_is_the_first_ad_the_statement_mentions(
     )
     rel = env.release([entry])
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'account_spending_limit')}.")
-    assert res["ok"], res["reasons"]
-    assert IMG2_NAME not in res["text"], res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review_notebook_label_is_purchase_wording_when_config_is_unreadable(
@@ -287,9 +302,11 @@ def test_J4R_review_notebook_label_is_purchase_wording_when_config_is_unreadable
     rel = env.release([entry])
     (env.config_root / f"{CLIENT}.yaml").write_text("not: [valid")
     res = env.render(f"{fig_nb(rel, 'nbe_lead_client_0009', 'cpa')}.")
-    assert res["ok"], res["reasons"]
-    low = res["text"].lower()
-    assert "purchase" not in low and "order" not in low, res["text"]
+    # S26 (4) (R11, R12) sets this differently: the quantity states no subject, so the slot
+    # fails rather than rendering. The account is a subject that is stated, never a default.
+    assert refused(res), repr(res["text"])
+    assert any(S.R_NO_SUBJECT in r for r in res["reasons"]), res["reasons"]
+
 
 
 def test_J4R_review_name_slot_with_braces_in_the_display_name_reaches_the_text(
