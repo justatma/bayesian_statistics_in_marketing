@@ -53,12 +53,14 @@ METRIC_LABELS_LEAD: dict[str, str] = {
     **METRIC_LABELS,
     "cpa": "cost per sign-up",
     "cvr": "sign-up rate",
+    "aov": "average value per sign-up",
 }
 
 METRIC_ALIASES_LEAD: dict[str, tuple[str, ...]] = {
     **METRIC_ALIASES,
     "cpa": ("cost per sign-up", "cost per signup", "cost per lead", "cost per conversion", "cpa"),
     "cvr": ("sign-up rate", "signup rate", "lead rate", "conversion rate", "cvr"),
+    "aov": ("average value per sign-up", "value per sign-up", "aov"),
 }
 
 #: Words that name a purchase and so cannot describe a lead account's conversion (J5, J4).

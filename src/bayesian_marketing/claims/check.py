@@ -202,8 +202,10 @@ _COST_METRICS = frozenset({"cpa", "cpc", "cpm"})
 # J5 (S11, S15): on a lead run cost-per money (cost per sign-up, cost per click) displays and is
 # checked in cents; cpm keeps money_decimals.
 _LEAD_UNIT_MONEY = frozenset({"cpa", "cpc"})
+# A hyphen bounds the word here, so "pre-order" and "per-order" are refused; "reordered" and
+# "border" only contain one and pass (J5 review F3).
 _PURCHASE_WORD_RE = re.compile(
-    r"(?<![\w-])(?:" + "|".join(re.escape(w) for w in V.PURCHASE_WORDS) + r")(?![\w-])",
+    r"(?<!\w)(?:" + "|".join(re.escape(w) for w in V.PURCHASE_WORDS) + r")(?!\w)",
     re.IGNORECASE,
 )
 

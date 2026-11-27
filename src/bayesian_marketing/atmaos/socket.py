@@ -425,14 +425,15 @@ def conversion_kind_of(s: pipeline.RunSnapshot) -> str:
         return s.conversion_kind
     if s.synthetic:
         return "purchase"
+    import yaml
+
     from bayesian_marketing.live import config as live_config
     from bayesian_marketing.live import refresh as live_refresh
 
-    try:
-        cfg = live_config.load_client(s.client_id)
-    except (FileNotFoundError, ValueError):
+    try:  # any failure to read or parse the config is "purchase", never a raise (review F1, F2)
+        return live_refresh._conversion_kind(live_config.load_client(s.client_id))
+    except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
         return "purchase"
-    return live_refresh._conversion_kind(cfg)
 
 
 def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) -> ReportBundle:
