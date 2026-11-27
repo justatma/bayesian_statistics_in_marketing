@@ -334,6 +334,12 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
     )
 
 
+def divergences_only(report: DiagnosticsReport) -> bool:
+    """S40 (1): G3 fails on divergences alone: ``n_divergences`` is a number above
+    ``divergences_max`` and every other G3 check passes. A None ``n_divergences`` is False."""
+    raise NotImplementedError
+
+
 def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
     """The only setter of ``passed``. A fail quarantines the state and triggers fallback.
 

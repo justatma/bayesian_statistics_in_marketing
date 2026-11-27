@@ -167,6 +167,9 @@ class RunSnapshot(BaseModel):
     entity_parents: dict[str, str] = {}
     # J7 (8): the account's IANA time zone as Meta reports it, from the pull; None before J7
     timezone: str | None = None
+    # J8 (11): every NUTS try (step, try, seed, divergences, passed); empty before J8 and on the
+    # conjugate route
+    fit_attempts: list[dict[str, Any]] = []
     manifest_id: str
     dataset_hashes: list[str]
     # J2 (S31): the bayes-rows-c1 keys of the rows the run read, sorted; empty before J2
@@ -670,6 +673,8 @@ class Fit:
     step: str
     """The step that produced the state: ``conjugate`` (D11 route), ``nuts_full``,
     ``nuts_static``, ``nuts_unpooled`` or ``fallback_conjugate`` (§7.5)."""
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    """J8 (11), S40 (3): every NUTS try, in order; empty on the conjugate route."""
 
 
 def fit(data: FunnelData, priors: PriorSet, seed: int) -> Fit:

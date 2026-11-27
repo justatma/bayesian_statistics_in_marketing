@@ -40,6 +40,21 @@ from bayesian_marketing.model_spec import compile as compile_mod
 
 FALLBACK_FLAG = "route.fallback_conjugate"
 
+RETRIES = 2
+"""J8 (10), S40: a NUTS step whose G3 fails on divergences alone is tried at most 1 + RETRIES
+times before the chain moves on."""
+
+ATTEMPT_FIELDS = ("step", "try", "seed", "divergences", "passed")
+"""J8 (11): one record per try, in ``RunSnapshot.fit_attempts``."""
+
+
+def retry_seed(seed: int, step: str, n: int, taken: set[int]) -> int:
+    """S40 (2): try 1 is ``seed``; try n (2 or 3) is
+    ``int(inputs_hash({"seed": seed, "step": step, "try": n})[:8], 16)``, salted with a counter
+    until it is not ``seed`` and not in ``taken`` (the seeds already used)."""
+    raise NotImplementedError
+
+
 # Notice wording, held here until the integrator adds phrasing keys (manifest open question 1).
 STEP_FAILED_G3 = "{step} failed G3 ({why})"
 STEP_RAISED = "{step} raised {exc_type}: {message}"
