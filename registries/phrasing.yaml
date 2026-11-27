@@ -38,7 +38,8 @@ comparative_lexicon:  # D29, D31: counts only when an option is the subject; dir
   comparative: [better, worse, higher, lower, stronger, weaker, more, fewer, less, cheaper,
                 "more expensive", outperform, underperform, beat, "ahead of", ahead, behind, trail,
                 "superior to", superior, "inferior to", inferior, "wins against", win, won, lead,
-                leading, "loses to", lose, lost]
+                leading, "loses to", lose, lost, outrank, dominate, tops, "edges out", "edge over",
+                favorite, favourite, "the pick", preferable]  # last row: J4 review, 26 Nov
   superlative: [best, worst, highest, lowest, strongest, weakest, cheapest, winner, loser,
                 "top performer", "bottom performer", "top ad", "top campaign", leader, "the leader",
                 first, last, "on top", "number one", "came out ahead"]
