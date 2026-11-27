@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
 
 from bayesian_marketing import pipeline
@@ -24,6 +27,9 @@ from bayesian_marketing.live import horizon as live_horizon
 from bayesian_marketing.live import markers
 from bayesian_marketing.live import rows as live_rows
 from bayesian_marketing.live.contracts import Clock, LiveRow, PollRecord, RefreshRecord, Store
+from bayesian_marketing.live.registry import LiveRegistry, load_live_registry
+
+log = logging.getLogger(__name__)
 
 ONE_AD = "one ad, nothing to compare"
 NO_ECONOMICS_PATH = "no economics file in the client config"
@@ -40,9 +46,11 @@ def refresh(
     *,
     data_dir: Path,
     config_root: Path,
+    registry: LiveRegistry | None = None,
 ) -> RefreshRecord:
-    """Runs ``ctr`` through ``pipeline.execute`` with the poll's rows; stores and returns the
-    record. Never raises (C2)."""
+    """Runs ``ctr`` through ``pipeline.execute`` with the poll's rows in the analysis window
+    (L12); stores and returns the record. ``registry`` gives ``analysis_days``, loaded from
+    ``registries/live.yaml`` when not given. Never raises (C2)."""
     at = clock.now()
     refresh_id = (
         "lv_" + hashlib.sha256(f"{poll_rec.poll_id}|{at.isoformat()}".encode()).hexdigest()[:8]
@@ -58,7 +66,7 @@ def refresh(
             reason=f"poll {poll_rec.poll_id} is {poll_rec.status}; no engine run",
             run_id=None,
         )
-    status, reason, run_id = _outcome(config, poll_rec, store, data_dir, config_root)
+    status, reason, run_id = _outcome(config, poll_rec, store, data_dir, config_root, registry)
     rec = RefreshRecord(
         refresh_id=refresh_id,
         poll_id=poll_rec.poll_id,
@@ -78,29 +86,44 @@ def _outcome(
     store: Store,
     data_dir: Path,
     config_root: Path,
+    registry: LiveRegistry | None,
 ) -> tuple[str, str | None, str | None]:
     try:
-        rows = store.rows(poll_rec.poll_id)
+        reg = registry if registry is not None else load_live_registry()
+        window = analysis_window(poll_rec.window, reg.analysis_days)
+        # L12.1: every input below comes from the poll's rows dated in the analysis window
+        rows = [r for r in store.rows(poll_rec.poll_id) if window[0] <= r.date <= window[1]]
         ads = sorted({r.entity_ids["ad"] for r in rows if r.entity_ids.get("ad")})
         if len(ads) < 2:
             return "skipped", ONE_AD, None
         if not config.economics_path:
             return "skipped", NO_ECONOMICS_PATH, None
         manifest = _manifest(config, poll_rec, rows, ads)
-        pull = _pull(poll_rec, rows)
+        pull = _pull(poll_rec, rows, window)
         horizon, basis = _budget_horizon(manifest, config_root, poll_rec, rows, store)
         request = CompareRequest(
             metric=METRIC,
             variants=ads,
             priors=dict(config.priors),
-            window=poll_rec.window,
+            window=window,
             horizon=horizon,
             conversion_kind=_conversion_kind(config),
             horizon_basis=basis,
         )
         # J2 (S30): no live run without its pointer; a raise here fails the refresh
+        t0 = time.perf_counter()
         history, seen, _ = live_rows.versioned(store, poll_rec.client_id)
-        row_keys, sha = live_rows.pointer(history, seen, poll_rec.poll_id)
+        # L12.7 (3), follow-up M2: the hourly job measures versioned's cost
+        log.info(
+            "refresh %s: versioned %d versions in %.3f s",
+            poll_rec.poll_id,
+            len(history),
+            time.perf_counter() - t0,
+        )
+        # L12.2: the versions the poll read for dates in the run's window
+        row_keys, sha = live_rows.pointer(
+            history, seen, poll_rec.poll_id, (window[0].isoformat(), window[1].isoformat())
+        )
         with data_dir_env(data_dir):
             ctx = pipeline.execute(
                 manifest,
@@ -124,6 +147,12 @@ def _outcome(
         return "skipped", _gate_text(exc), None
     except Exception as exc:  # C2: refresh never raises
         return "failed", f"{type(exc).__name__}: {exc}", None
+
+
+def analysis_window(poll_window: tuple[date, date], analysis_days: int) -> tuple[date, date]:
+    """L12.4: the last ``analysis_days`` of the poll's window, never wider than the poll's."""
+    start, end = poll_window
+    return max(start, end - timedelta(days=analysis_days - 1)), end
 
 
 NAMED_LEVELS = ("campaign", "ad_set", "ad")
@@ -222,7 +251,7 @@ def _manifest(
     )
 
 
-def _pull(poll_rec: PollRecord, rows: list[LiveRow]) -> PlatformPull:
+def _pull(poll_rec: PollRecord, rows: list[LiveRow], window: tuple[date, date]) -> PlatformPull:
     perf = [
         PerformanceRow(
             entity_ids=dict(r.entity_ids),
@@ -248,7 +277,7 @@ def _pull(poll_rec: PollRecord, rows: list[LiveRow]) -> PlatformPull:
         platform=PLATFORM,
         channel_ref=channel_ref(PLATFORM),
         account_id=poll_rec.account_id,
-        window=poll_rec.window,
+        window=window,
         rows=perf,
         quarantined=[],
         partial_truth=partial,

@@ -263,14 +263,15 @@ def test_L2_window_ends_on_account_local_date(
     rec = _poll(store, clock, config=_config(tz="America/New_York"))
     assert rec.status == "ok"
     assert rec.window[1] == dt.date(2026, 11, 6)  # L2 check 7, C1
-    assert rec.window == (dt.date(2026, 10, 31), dt.date(2026, 11, 6))  # L2 C1: 7 dates inclusive
+    # L2 C1: lookback_days dates inclusive; 28 since D55 (L12.7 (1), amended on the record)
+    assert rec.window == (dt.date(2026, 10, 10), dt.date(2026, 11, 6))
     ranges = [
         json.loads(v)
         for r in seen
         for k, v in httpx.QueryParams(r.url.query).multi_items()
         if k == "time_range"
     ]
-    assert ranges and ranges[0] == {"since": "2026-10-31", "until": "2026-11-06"}  # L2 C1 pull call
+    assert ranges and ranges[0] == {"since": "2026-10-10", "until": "2026-11-06"}  # L2 C1 pull call
     assert len(store.rows(rec.poll_id)) == 6
 
 

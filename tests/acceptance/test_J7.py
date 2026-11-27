@@ -86,6 +86,9 @@ pytestmark = pytest.mark.piece("J7")
 
 REPO = Path(__file__).resolve().parents[2]
 CONFIG_HASH_BEFORE_J7 = "afd651575f3414a0b320f0399ee8b54e9ba576c2b5c89bf875ea6bcac1be7055"
+# L12.3 (D55): live.yaml's version is bumped to 2026-11-27, so every new run's config hash
+# changes once. With the version at 2026-11-07 this run still gives CONFIG_HASH_BEFORE_J7.
+CONFIG_HASH_AFTER_L12 = "6015e37dd5d25ddfc0604c0b2c2d6b6ff02080fee201b6fe2d0d4adb20352c7c"
 BASE = at("2026-11-10T12:00")
 H1 = dt.timedelta(hours=1)
 D1 = dt.timedelta(days=1)
@@ -872,7 +875,7 @@ def test_J7_k_run_id_seed_and_config_hash_are_unchanged(
     assert snap.timezone == J2.TZ  # the J7 field is filled
     assert run_id == RUN_ID_BEFORE_J2
     assert record.seeds["fit"] == SEED_BEFORE_J2 == snap.configuration["seed"]
-    assert snap.config_hash == record.config_hash == CONFIG_HASH_BEFORE_J7
+    assert snap.config_hash == record.config_hash == CONFIG_HASH_AFTER_L12  # L12.3
 
 
 # ------------------------------------------------------------------ property: held <= raw

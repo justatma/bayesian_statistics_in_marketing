@@ -22,9 +22,9 @@ Writes `data/live/exports/<client_id>/<UTC stamp>/` (outside git):
 Every row carries `key` (stable across exports, since the store is append-only), `describes` (the
 day or window it is about), `timezone` (the ad account's, as Meta names it), `known_at` (when the figure became known: the poll's start, the run's
 start, or the read) and the account, campaign, ad set and ad ids. No personal data is read.
-Each run row also carries `row_keys` (for every ad-day in the poll it read, the version known at
-that poll) and `rows_sha256`, computed under the canonical form `bayes-rows-c1`: each polls row as
-JSON with keys sorted, separators "," and ":", UTF-8 without ASCII escaping, numbers as stored
+Each run row also carries `row_keys` (for every ad-day in the poll it read and in the run's window,
+the version known at that poll; live view spec L12.2) and `rows_sha256`, computed under the
+canonical form `bayes-rows-c1`: each polls row as JSON with keys sorted, separators "," and ":", UTF-8 without ASCII escaping, numbers as stored
 (integers bare, figures such as spend as the strings Meta gives), dates as ISO 8601 text; one row
 per line ending in a line feed; rows ordered by `key`. The pointer a claim names is these keys
 and this hash; the stored file is the first one holding them.
@@ -49,7 +49,14 @@ import urllib.request
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from bayesian_marketing.live.rows import MEASURES, ROWS_FORM, canonical, rows_sha256, versioned  # noqa: F401
+from bayesian_marketing.live.rows import (  # noqa: F401
+    MEASURES,
+    ROWS_FORM,
+    canonical,
+    pointer,
+    rows_sha256,
+    versioned,
+)
 from bayesian_marketing.live.store import SqliteStore
 
 REPO = Path(__file__).resolve().parents[1]
@@ -65,7 +72,6 @@ BACKFILL_FIELDS = (
 def runs(
     store: sqlite3.Connection, client_id: str, tz: str, poll_rows: list[dict], seen: dict[str, list[str]]
 ) -> list[dict]:
-    by_key = {r["key"]: r for r in poll_rows}
     record = sqlite3.connect(f"file:{LIVE / 'engine' / 'run_record.sqlite'}?mode=ro", uri=True)
     started = {}
     for (payload,) in record.execute("SELECT payload FROM run_records"):
@@ -82,7 +88,8 @@ def runs(
         d = json.loads(path.read_text())
         if d.get("client_id") != client_id:
             continue
-        keys = seen.get(poll_of.get(d["run_id"]), [])
+        # L12.2: the versions the run's poll read for dates in the run's window
+        keys, sha = pointer(poll_rows, seen, poll_of.get(d["run_id"]), tuple(d["window"]))
         out.append({
             "key": d["run_id"],
             "describes": {"start": d["window"][0], "end": d["window"][1]},
@@ -91,7 +98,7 @@ def runs(
             "poll_id": poll_of.get(d["run_id"]),
             "row_keys": keys,
             "rows_form": ROWS_FORM,
-            "rows_sha256": rows_sha256([by_key[k] for k in keys]),
+            "rows_sha256": sha,
             "account": None,
             "metric": d["metric"],
             "horizon": d.get("horizon"),

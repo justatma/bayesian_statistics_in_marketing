@@ -1,8 +1,10 @@
-# Live view (spec/Live_View_Specification_v0.2.md §3.4, D41). Owner's rulings of 2026-11-07.
-version: "2026-11-07"
-freshness_date: "2026-11-07"     # informational; staleness of this file blocks nothing
+# Live view (spec/Live_View_Specification_v0.2.md §3.4, D41). Owner's rulings of 2026-11-07;
+# the re-read widened to 28 days and the analysis window added on 2026-11-27 (D55, spec L12).
+version: "2026-11-27"
+freshness_date: "2026-11-27"     # informational; staleness of this file blocks nothing
 interval_seconds: 3600           # owner: sixty minutes between reads
-lookback_days: 7                 # each poll re-reads the last 7 account-local days, today included
+lookback_days: 28                # D55: each poll re-reads the last 28 account-local days, today included
+analysis_days: 7                 # D55: each run estimates from the last 7 of those days; <= lookback_days
 stale_after_seconds: 7200        # page banner when the last good poll is older
 recordings_keep_days: 7          # redacted exchanges; rows are kept forever
 page_refresh_seconds: 300        # <meta http-equiv="refresh">
