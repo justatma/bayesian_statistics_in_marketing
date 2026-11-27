@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -165,6 +165,9 @@ class RunSnapshot(BaseModel):
     entity_names: dict[str, str] = {}
     manifest_id: str
     dataset_hashes: list[str]
+    # J2 (S31): the bayes-rows-c1 keys of the rows the run read, sorted; empty before J2
+    row_keys: list[str] = []
+    rows_form: str | None = None
     platform: str
     window: tuple[date, date]
     as_of: date
@@ -971,6 +974,9 @@ def execute(
     pulls: list[PlatformPull] | None = None,
     on_stage: Stage | None = None,
     entity_names: dict[str, str] | None = None,
+    extra_dataset_hashes: Sequence[str] = (),
+    row_keys: Sequence[str] = (),
+    rows_form: str | None = None,
 ) -> RunContext:
     """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage.
     ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else."""
