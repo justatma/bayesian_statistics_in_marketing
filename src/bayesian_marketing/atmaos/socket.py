@@ -569,3 +569,26 @@ def check_client_figures(
     return dict(
         _check(text, refs, load_run=load_run, load_release=load_release, load_names=load_names)
     )
+
+
+def client_slots(client_id: str, *, load_run=None, load_release=None, load_names=None) -> dict:
+    """J4R: the menu of figure slots for a client (C3). See ``claims.slots.client_slots``."""
+    from bayesian_marketing.claims.slots import client_slots as _menu
+
+    return dict(
+        _menu(client_id, load_run=load_run, load_release=load_release, load_names=load_names)
+    )
+
+
+def render_client_text(
+    text: str, client_id: str, *, load_run=None, load_release=None, load_names=None
+) -> dict:
+    """J4R: render a persona's text with its slots (C1 to C7). See
+    ``claims.slots.render_client_text``. ``ok`` False gives ``text`` None."""
+    from bayesian_marketing.claims.slots import render_client_text as _render
+
+    return dict(
+        _render(
+            text, client_id, load_run=load_run, load_release=load_release, load_names=load_names
+        )
+    )

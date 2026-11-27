@@ -1,4 +1,4 @@
-# Brain join specification, v0.4 (draft: J4R)
+# Brain join specification, v0.4
 
 26 November 2026, the Bayesian Engineer. Version 0.2 takes the blind review of v0.1 (`spec/reviews/brain_join_blind_01.md`, Sonnet: 2 blocking, 6 major, 2 minor, 14 undecided). Every point is settled in S1 to S14 at the end. None needed the owner, so nothing went to him from this review. Version 0.3 takes the Principal Architect's note on v0.2 (26 Nov, P1 to P6 at the end). This spec covers the engine's side of joining the engine to AtmaOS and to Imani Brooks, the AtmaOS team member who explains the engine's work to the client. It follows spec 42 FR7.2 in the AtmaOS repository and the owner's rulings: D54 here, and D676 and D677 in AtmaOS. Pieces already built are listed so the rest can be read against them. Each piece below that has a status of "to build" has an interface and checks. Nothing in it is built until the blind spec review's undecided list is answered.
 
@@ -279,3 +279,12 @@ Kept from J4: (f) below floor, (i) unreadable refs, (m) two clients, (p) stalene
 - `cmp` renders from the comparison record, and a test proves no subtraction happens.
 
 The code for loading refs, staleness, names and labels comes over from the unmerged J4 branch (piece/J4 at 3ebcd01).
+
+### Accepted by the Principal Architect (26 Nov), with six additions (A1 to A6) frozen into the checks
+
+A1. `render_client_text(text, client_id, ...)` takes the client. Any ref that doesn't belong to that client fails the call (`R_OTHER_CLIENT`). The wall doesn't rest on AtmaOS's menu check alone. Check: a template whose refs all belong to another client fails.
+A2. After the slots are removed, any "{" or "}" left fails (`R_BRACE`). A `date` slot's ref is validated as a strict ISO 8601 date or datetime even though the engine doesn't render it, and anything else fails (`R_BAD_DATE`). Checks: a malformed slot fails, "{date:next week}" fails, and "{date:2026-11-26}" passes through untouched.
+A3. Matching for the numeral rule: normalise to NFKC, casefold, strip Unicode category Cf, then match whole words with whitespace, hyphens and slashes as word breaks. Checks: "twenty-five", "two-thirds", and "two" with a zero-width joiner inside each fail.
+A4. "None", "no", "all" and "every" state a quantity, zero or the whole. They stay allowed because she can't speak without them, and they sit outside the guarantee. The lint fails a sentence where one of them shares the sentence with a measure word (clicks, link clicks, sign-ups, leads, spend, impressions, and every J5 label and alias), with `R_ZERO_OR_ALL`. "No sign-ups yet" is a figure: where it is true, it is a slot, a count of zero rendered by the engine. Checks: "no sign-ups yet" fails, and "none of this changes your plan" passes.
+A5. The "#claim_id" on a ref is attached by AtmaOS from its own mapping after the persona writes. A claim id in her template is overwritten (the Head Engineer's). `cmp` `start` form: "IMG3_TXT1 leads on clicks, with a 62% chance of being best", with the caveat or floor wording as in `full`.
+A6. `QUANTITY_WORDS` stays as it is. "Only one sign-up" is a figure and must fail. The list goes into the persona's instructions (the Head Engineer's), and every refusal's reason names its word, so the words that cost retries can be counted after her acceptance turns. Check: each refusal's reason contains the word it refused.
