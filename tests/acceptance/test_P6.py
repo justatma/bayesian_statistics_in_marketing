@@ -96,7 +96,7 @@ def test_P6_each_fallback_step_emits_notice(monkeypatch: pytest.MonkeyPatch) -> 
     sampler = FakeSampler([failing_report()])
     compiler = _patch(monkeypatch, sampler)
     spec = B.funnel_spec(dynamics="random_walk")
-    state, reports, notices = fallback.fit_with_fallback(spec, B.default_prior_set(), _data(), 7)
+    state, reports, notices, _ = fallback.fit_with_fallback(spec, B.default_prior_set(), _data(), 7)
 
     assert len(sampler.calls) == 3, "three NUTS attempts before the conjugate step"
     assert len(compiler.specs) == 3
@@ -116,7 +116,7 @@ def test_P6_extra_fallback_stops_at_first_pass(monkeypatch: pytest.MonkeyPatch) 
     sampler = FakeSampler([failing_report(), passing_report()])
     _patch(monkeypatch, sampler)
     spec = B.funnel_spec(dynamics="random_walk")
-    state, reports, notices = fallback.fit_with_fallback(spec, B.default_prior_set(), _data(), 7)
+    state, reports, notices, _ = fallback.fit_with_fallback(spec, B.default_prior_set(), _data(), 7)
     assert len(sampler.calls) == 2
     assert state.route == "nuts"
     assert [r.passed for r in reports] == [False, True]

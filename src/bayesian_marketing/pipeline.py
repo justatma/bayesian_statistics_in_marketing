@@ -686,13 +686,29 @@ def fit(data: FunnelData, priors: PriorSet, seed: int) -> Fit:
         reports = [run_diagnostics(state, data)]  # PPC on the exact route; no sampler ran
         step = "conjugate"
     else:
-        state, reports, degr = fallback.fit_with_fallback(spec, priors, data, seed)
+        state, reports, degr, attempts = fallback.fit_with_fallback(spec, priors, data, seed)
         notices += [f"{n.step}: {n.reason}" for n in degr]
-        step = degr[-1].step if degr else "nuts_full"
-        if step == "conjugate":
-            step = "fallback_conjugate"
+        # S40 (3): the step is the accepted attempt's; no accepted attempt is the §7.5 fallback
+        accepted = accepted_attempt(attempts)
+        step = "fallback_conjugate" if accepted is None else accepted["step"]
+        store.save(state)
+        return Fit(r, state, reports, notices, spec, step, attempts)
     store.save(state)
     return Fit(r, state, reports, notices, spec, step)
+
+
+def accepted_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """J8 (11): the attempt whose try passed G3, or None (no NUTS try passed, or none ran)."""
+    return next((a for a in attempts if a.get("passed")), None)
+
+
+def _seeds(seed: int, attempts: list[dict[str, Any]]) -> dict[str, int]:
+    """The run record's seeds. S40 (4): ``fit`` is the run's seed; ``fit_accepted`` is added only
+    when a retry (try 2 or later) was accepted."""
+    accepted = accepted_attempt(attempts)
+    if accepted is None or accepted["try"] == 1:
+        return {"fit": seed}
+    return {"fit": seed, "fit_accepted": int(accepted["seed"])}
 
 
 # ------------------------------------------------------------------------------- derive + floors
@@ -1235,7 +1251,7 @@ def execute(
         quantity_ids=[q.quantity_id for q in quantities],
         recommendation_ids=[r.recommendation_id for r in recs],
         route_log=[f"route {route.kind}: {route.reason}", *notices, f"state {state.state_id}"],
-        seeds={"fit": seed},
+        seeds=_seeds(seed, fitted.attempts),
     )
     run_record.append(record)
     result = RunResult(
@@ -1253,6 +1269,7 @@ def execute(
         entity_parents=dict(entity_parents or {}),
         # J7 (8), S39 (11): the zone of the pull the run read; changes nothing else
         timezone=next((p.timezone for p in perf if p.timezone), None),
+        fit_attempts=[dict(a) for a in fitted.attempts],  # J8 (11), S40 (3)
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,

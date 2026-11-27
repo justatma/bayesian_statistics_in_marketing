@@ -182,8 +182,15 @@ def _pointer(s: pipeline.RunSnapshot) -> dict[str, Any]:
 
 
 def _fit_route(s: pipeline.RunSnapshot) -> dict[str, Any]:
-    """S39 (9): the route that produced the state. ``try`` is null until J8 records it."""
-    return {"kind": s.route.kind, "step": s.configuration.get("fit_step"), "try": None}
+    """S39 (9): the route that produced the state. ``try`` is the accepted try of J8's
+    ``fit_attempts``, null when no try was accepted (the conjugate route, the §7.5 fallback, a run
+    saved before J8)."""
+    accepted = pipeline.accepted_attempt(s.fit_attempts)
+    return {
+        "kind": s.route.kind,
+        "step": s.configuration.get("fit_step"),
+        "try": None if accepted is None else accepted["try"],
+    }
 
 
 def _held_of(s: pipeline.RunSnapshot) -> tuple[dict | None, str | None]:

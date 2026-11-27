@@ -122,7 +122,7 @@ def test_raising_step_is_a_recorded_failure(monkeypatch: pytest.MonkeyPatch) -> 
     spec = B.funnel_spec(dynamics="random_walk")
     ad = {"impressions": 800, "clicks": 16, "spend": 20.0, "conv_obs": 1}
     data = B.funnel_data({f"ad_{i}": dict(ad) for i in range(8)})
-    state, reports, notices = fallback.fit_with_fallback(spec, B.default_prior_set(), data, 5)
+    state, reports, notices, _ = fallback.fit_with_fallback(spec, B.default_prior_set(), data, 5)
     assert len(calls) == 3
     assert state.route == "conjugate"
     assert [n.step for n in notices] == ["nuts_static", "nuts_unpooled", "conjugate"]

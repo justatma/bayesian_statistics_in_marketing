@@ -16,6 +16,11 @@ store for audit. The step-4 state carries
 ``route.fallback_conjugate = 1`` in its parameters so downstream code can cap it at ``marginal``
 (§7.5; D11's from-the-start conjugate route is not stamped).
 
+J8 (10) to (12), S40, S44: within a NUTS step, a try whose G3 fails on divergences alone is retried
+up to ``RETRIES`` times at seeds from ``retry_seed``; try 1 keeps the run's seed, so a first-try
+pass is what it was before J8. Every try is recorded as an attempt, and a retried step adds one
+notice.
+
 ``compile_model`` and ``NumpyroSampler`` are looked up through their modules at call time.
 """
 
@@ -33,7 +38,7 @@ from bayesian_marketing.core import (
     make_id,
     registries,
 )
-from bayesian_marketing.diagnostics.run import g3, run_diagnostics
+from bayesian_marketing.diagnostics.run import divergences_only, g3, run_diagnostics
 from bayesian_marketing.funnel_state import store
 from bayesian_marketing.inference import conjugate, sampler_numpyro
 from bayesian_marketing.model_spec import compile as compile_mod
@@ -52,13 +57,22 @@ def retry_seed(seed: int, step: str, n: int, taken: set[int]) -> int:
     """S40 (2): try 1 is ``seed``; try n (2 or 3) is
     ``int(inputs_hash({"seed": seed, "step": step, "try": n})[:8], 16)``, salted with a counter
     until it is not ``seed`` and not in ``taken`` (the seeds already used)."""
-    raise NotImplementedError
+    if n == 1:
+        return seed
+    key: dict[str, object] = {"seed": seed, "step": step, "try": n}
+    out = int(inputs_hash(key)[:8], 16)
+    salt = 0
+    while out == seed or out in taken:
+        salt += 1
+        out = int(inputs_hash({**key, "salt": salt})[:8], 16)
+    return out
 
 
 # Notice wording, held here until the integrator adds phrasing keys (manifest open question 1).
 STEP_FAILED_G3 = "{step} failed G3 ({why})"
 STEP_RAISED = "{step} raised {exc_type}: {message}"
 JOINT_FAILED = "{phrase}: {cause}"  # phrase is phrasing/notices/joint_failed@v1
+STEP_RETRIED = "{step} retried on divergences: {tries}; {outcome}"  # J8 (11), one per step
 
 
 def _fit_config(seed: int) -> FitConfig:
@@ -119,29 +133,70 @@ def _conjugate_step(
     return state, report
 
 
+def _attempt(step: str, n: int, seed: int, divergences: int | None, passed: bool) -> dict:
+    return dict(zip(ATTEMPT_FIELDS, (step, n, seed, divergences, passed), strict=True))
+
+
+def _retry_notice(step: str, tried: list[dict], data: FunnelData) -> DegradationNotice:
+    tries = ", ".join(
+        f"try {a['try']} seed {a['seed']} "
+        + ("raised" if a["divergences"] is None else f"{a['divergences']} divergences")
+        for a in tried
+    )
+    last = tried[-1]
+    outcome = f"try {last['try']} accepted" if last["passed"] else "no try passed"
+    return _notice(step, STEP_RETRIED.format(step=step, tries=tries, outcome=outcome), data)
+
+
 def fit_with_fallback(
     spec: FunnelSpec, priors: PriorSet, data: FunnelData, seed: int
-) -> tuple[FunnelState, list[DiagnosticsReport], list[DegradationNotice]]:
-    """NUTS full; NUTS static; NUTS unpooled above ad; conjugate per ad (caps at marginal)."""
-    config = _fit_config(seed)
+) -> tuple[FunnelState, list[DiagnosticsReport], list[DegradationNotice], list[dict]]:
+    """NUTS full; NUTS static; NUTS unpooled above ad; conjugate per ad (caps at marginal).
+
+    J8 (10), S40, S44: a NUTS try whose G3 fails on divergences alone (``divergences_only``) is
+    retried at a new seed (``retry_seed``), up to ``RETRIES`` times; any other failure, a raise
+    included, moves the chain to the next step. Every try is an attempt (``ATTEMPT_FIELDS``),
+    returned in order as the fourth value; every G3-failed try's state is quarantined and its
+    report kept. A step that was retried adds one notice, after its tries.
+    """
     reports: list[DiagnosticsReport] = []
     notices: list[DegradationNotice] = []
+    attempts: list[dict] = []
+    taken: set[int] = {seed}
     cause: str | None = None  # why the previous step failed, carried into the next notice
     for step, step_spec in _nuts_steps(spec):
         if cause is not None:
             notices.append(_notice(step, cause, data))
-        try:
-            model = compile_mod.compile_model(step_spec, priors, data)
-            state, raw = sampler_numpyro.NumpyroSampler().fit(model, data, config)
-        except Exception as exc:  # integrator ruling: a raising step is a failed step, recorded
-            cause = STEP_RAISED.format(step=step, exc_type=type(exc).__name__, message=exc)
-            continue
-        report, gate = g3(raw)
-        reports.append(report)
-        if gate.passed:
-            return state.model_copy(update={"diagnostics_id": report.report_id}), reports, notices
-        _quarantine(state)
-        cause = STEP_FAILED_G3.format(step=step, why="; ".join(gate.reasons))
+        tried: list[dict] = []
+        accepted: FunnelState | None = None
+        for n in range(1, RETRIES + 2):
+            try_seed = retry_seed(seed, step, n, taken)
+            taken.add(try_seed)
+            try:
+                if n == 1:
+                    model = compile_mod.compile_model(step_spec, priors, data)
+                state, raw = sampler_numpyro.NumpyroSampler().fit(
+                    model, data, _fit_config(try_seed)
+                )
+            except Exception as exc:  # integrator ruling, S44 (2): a raising try is a failed try
+                cause = STEP_RAISED.format(step=step, exc_type=type(exc).__name__, message=exc)
+                tried.append(_attempt(step, n, try_seed, None, False))
+                break
+            report, gate = g3(raw)
+            reports.append(report)
+            tried.append(_attempt(step, n, try_seed, report.n_divergences, bool(gate.passed)))
+            if gate.passed:
+                accepted = state.model_copy(update={"diagnostics_id": report.report_id})
+                break
+            _quarantine(state)
+            cause = STEP_FAILED_G3.format(step=step, why="; ".join(gate.reasons))
+            if not divergences_only(report):  # S40 (1), S44 (3)
+                break
+        attempts += tried
+        if len(tried) > 1:
+            notices.append(_retry_notice(step, tried, data))
+        if accepted is not None:
+            return accepted, reports, notices, attempts
 
     if cause is None:  # unreachable: there is always at least one NUTS step
         raise RuntimeError("fallback chain ran no NUTS step")
@@ -150,4 +205,4 @@ def fit_with_fallback(
     )
     state, report = _conjugate_step(priors, data, seed)
     reports.append(report)
-    return state, reports, notices
+    return state, reports, notices, attempts

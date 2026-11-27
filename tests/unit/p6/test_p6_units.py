@@ -89,7 +89,7 @@ def test_identical_spec_step_skipped_and_failed_states_quarantined(
     spec = B.funnel_spec(dynamics="static", hierarchy=["ad"])
     data = B.funnel_data({f"ad_{i}": {"impressions": 800, "clicks": 16, "spend": 20.0,
                                       "conv_obs": 1} for i in range(8)})  # fmt: skip
-    state, reports, notices = fallback.fit_with_fallback(spec, B.default_prior_set(), data, 5)
+    state, reports, notices, _ = fallback.fit_with_fallback(spec, B.default_prior_set(), data, 5)
     assert len(sampler.calls) == 1
     assert [n.step for n in notices] == ["conjugate"]
     joint_failed = registries.resolve("phrasing/notices/joint_failed@v1")
