@@ -417,6 +417,13 @@ def approve_prior(prior_id: str, approver: str) -> dict:
 # ------------------------------------------------------------------------------- narrative, report
 
 
+def conversion_kind_of(s: pipeline.RunSnapshot) -> str:
+    """J5: the snapshot's own conversion kind, or, for a snapshot saved before J5, the client
+    config's (``configs/<client_id>.yaml``, by ``live.refresh._conversion_kind``'s rule); a synthetic
+    or unconfigured client is "purchase"."""
+    raise NotImplementedError
+
+
 def bundle_of(s: pipeline.RunSnapshot, kind: str, blocks: list[NarrativeBlock]) -> ReportBundle:
     if kind not in REPORT_KINDS:
         raise ValueError(f"report kind {kind!r} is not one of {REPORT_KINDS}")

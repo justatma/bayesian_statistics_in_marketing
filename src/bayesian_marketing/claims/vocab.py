@@ -47,6 +47,33 @@ METRIC_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# J5 (Brain join spec v0.3, D46): a lead account converts on sign-ups, never orders. The purchase
+# tables above are unchanged; a lead run reads these instead, wherever a label is read.
+METRIC_LABELS_LEAD: dict[str, str] = {
+    **METRIC_LABELS,
+    "cpa": "cost per sign-up",
+    "cvr": "sign-up rate",
+}
+
+METRIC_ALIASES_LEAD: dict[str, tuple[str, ...]] = {
+    **METRIC_ALIASES,
+    "cpa": ("cost per sign-up", "cost per signup", "cost per lead", "cost per conversion", "cpa"),
+    "cvr": ("sign-up rate", "signup rate", "lead rate", "conversion rate", "cvr"),
+}
+
+#: Words that name a purchase and so cannot describe a lead account's conversion (J5, J4).
+PURCHASE_WORDS: tuple[str, ...] = ("order", "orders", "purchase", "purchases")
+
+
+def labels(conversion_kind: str) -> tuple[dict[str, str], dict[str, tuple[str, ...]]]:
+    """The label and alias tables for a run's conversion kind ("purchase" or "lead")."""
+    if conversion_kind == "lead":
+        return METRIC_LABELS_LEAD, METRIC_ALIASES_LEAD
+    if conversion_kind == "purchase":
+        return METRIC_LABELS, METRIC_ALIASES
+    raise ValueError(f"unknown conversion kind {conversion_kind!r}")
+
+
 def phrasing() -> dict[str, Any]:
     return registries.load("phrasing")
 

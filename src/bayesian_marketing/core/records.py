@@ -120,6 +120,7 @@ class ReportBundle(Frozen):
     diagnostics: list[DiagnosticsReport]
     knowability: KnowabilitySection
     narrative_blocks: list[NarrativeBlock]
+    conversion_kind: Literal["purchase", "lead"] = "purchase"  # J5: chooses the label tables
 
     @model_validator(mode="after")
     def _g10_no_synthetic_in_client(self) -> ReportBundle:

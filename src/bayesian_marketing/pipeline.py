@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Literal, Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
@@ -159,6 +159,8 @@ class RunSnapshot(BaseModel):
     run_id: str
     client_id: str
     synthetic: bool
+    # J5: None on snapshots saved before J5; read through ``socket.conversion_kind_of``.
+    conversion_kind: Literal["purchase", "lead"] | None = None
     manifest_id: str
     dataset_hashes: list[str]
     platform: str
