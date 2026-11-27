@@ -534,3 +534,12 @@ event: set by the integrator from her account, logged, provisional until the fir
 Standard library server and SQLite; no new dependency. Page rendered per request; the store the
 only state. Names and objective from the insights call. Builders on Opus, two at a time (L1 with
 L2, then L3 with L4); facts pack F2b and reviews on Sonnet; 250,000 tokens per agent.
+
+## L12. Re-read 28 days, analyse 7 (D55, to build, 27 Nov)
+
+1. `registries/live.yaml`: `lookback_days: 28` (the poll's re-read), and a new `analysis_days: 7` (the engine's window). `LiveRegistry` gains `analysis_days: int` with `1 <= analysis_days <= lookback_days`, and a registry that breaks that rule fails to load.
+2. The poll reads and stores all 28 days, as now, just more of them. Every row it reads goes into the store, and versions are cut by J1 as now.
+3. The refresh analyses only the last `analysis_days` account-local days of the poll's window. Its `CompareRequest.window` is `(window_end - analysis_days + 1, window_end)`. The rows passed to `pipeline.execute`, the pull, the horizon's pace and every other input the refresh builds are the poll's rows with `date` in that window. A poll whose 28 days hold fewer than two ads in the analysis window is skipped with `ONE_AD`, as now.
+4. The row pointer (J2) names the rows the run used. `row_keys` are the versions that poll read for dates in the run's window. `rows_sha256` is over those rows. `scripts/export_history.py`'s `runs.jsonl` does the same, taking the run's window from the run file. For every run made before L12 the window equals the poll's, so its row_keys and hash don't change.
+5. Every other reader of a poll's rows or window is audited and named in the build log, for example the live view's tables, the prior score and the spend-to-date query. Each one either keeps showing the analysis window, which is the default, or is shown to need the full read.
+6. Checks: (a) a fixture poll of 28 days gives a run whose window is its last 7, and whose quantities equal a run on a 7-day poll of the same last 7 days (same seed inputs aside). (b) The run's row_keys hold only dates in its window, and equal a fresh export's for that run. (c) A registry with analysis_days above lookback_days fails to load. (d) Pre-L12 runs export the same row_keys and rows_sha256 as before. (e) A restated day 20 days back becomes a new version in the store, while the run's pointer is unchanged unless the day is in its window. (f) The whole suite passes.
