@@ -184,7 +184,12 @@ def write_release(
     files = {name: sha((folder / name).read_bytes()) for name in FILES}
     integrity = {"algorithm": "sha256", "files": files, "release_hash": release_hash(files)}
     (folder / "integrity.json").write_bytes(canonical(integrity) + b"\n")
-    verify(folder)
+    h = verify(folder)
+    # J3 (S34): the marker after verify passes; a failure raises, the folder stays, and
+    # scripts/markers_backfill.py writes the marker later
+    from bayesian_marketing.live import markers
+
+    markers.notebook_release_marker(folder, h)
     return folder
 
 

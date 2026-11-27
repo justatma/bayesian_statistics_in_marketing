@@ -8,10 +8,18 @@ Idempotent: a second run writes nothing.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from bayesian_marketing.live import markers
 
 
 def main() -> int:
-    raise NotImplementedError
+    counts = markers.backfill()
+    for kind, n in counts.items():
+        print(f"{kind}: {n} written")
+    return 0
 
 
 if __name__ == "__main__":

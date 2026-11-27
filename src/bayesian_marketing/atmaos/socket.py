@@ -32,6 +32,7 @@ from bayesian_marketing.core import (
 )
 from bayesian_marketing.decision import run_record
 from bayesian_marketing.decision.guarantees import render_guarantee
+from bayesian_marketing.live.rows import HASH_PREFIX
 from bayesian_marketing.prior_registry import registry as prior_registry
 from bayesian_marketing.reporting.render import render
 
@@ -169,6 +170,17 @@ def compare(
     return result_of(ctx.snapshot)
 
 
+def _pointer(s: pipeline.RunSnapshot) -> dict[str, Any]:
+    """J2 (S2, S32): the rows the run read. ``rows_sha256`` is the hex of the snapshot's one
+    ``bayes-rows-c1:`` dataset hash; a run made before J2 gives null and an empty list."""
+    hexes = [h.removeprefix(HASH_PREFIX) for h in s.dataset_hashes if h.startswith(HASH_PREFIX)]
+    return {
+        "rows_form": s.rows_form,
+        "rows_sha256": hexes[0] if hexes else None,
+        "row_keys": list(s.row_keys),
+    }
+
+
 def _posterior_entry(s: pipeline.RunSnapshot, variant: str) -> dict[str, Any]:
     ad = s.variants[variant]
     name = pipeline.metric_quantity(s.metric)
@@ -176,7 +188,12 @@ def _posterior_entry(s: pipeline.RunSnapshot, variant: str) -> dict[str, Any]:
         (x for x in s.quantities if x.name == name and x.scope.ids.get("ad") == ad),
         None,
     )
-    entry: dict[str, Any] = {"entity": {s.platform: ad}, "metric": name, "synthetic": s.synthetic}
+    entry: dict[str, Any] = {
+        "entity": {s.platform: ad},
+        "metric": name,
+        "synthetic": s.synthetic,
+        **_pointer(s),
+    }
     if q is None:
         reason = s.not_estimable.get(variant, {}).get(name, "not estimable")
         return entry | {
