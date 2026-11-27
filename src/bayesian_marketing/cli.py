@@ -77,6 +77,22 @@ def _say(label: str, text: str) -> None:
     print(f"{label + ':':<16}{text}", flush=True)
 
 
+def _refresh_timing_to_stderr() -> None:
+    """L12.7 (3), follow-up M2: the refresh's ``versioned`` seconds reach the hourly job's log.
+    Only that one logger is opened at INFO, so no other library's INFO lines (request URLs among
+    them) are written."""
+    import logging
+
+    lg = logging.getLogger("bayesian_marketing.live.refresh")
+    for old in [h for h in lg.handlers if getattr(h, "_bayes_timing", False)]:
+        lg.removeHandler(old)  # one handler, on this call's standard error stream
+    h = logging.StreamHandler(sys.stderr)
+    h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    h._bayes_timing = True  # type: ignore[attr-defined]
+    lg.addHandler(h)
+    lg.setLevel(logging.INFO)
+
+
 def _count(n: int, word: str) -> str:
     return f"{n:,} {word}" + ("" if n == 1 else "s")
 
@@ -402,6 +418,7 @@ def live(args: argparse.Namespace) -> int:
     data_dir = Path(os.environ.get("BAYES_DATA_DIR", base / "engine"))
     croot = live_config.config_root()
     registry = load_live_registry()
+    _refresh_timing_to_stderr()
     clock = SystemClock()
     base.mkdir(parents=True, exist_ok=True)
 
@@ -424,7 +441,9 @@ def live(args: argparse.Namespace) -> int:
             if last is None:
                 _say("Refresh", f"{cfg.client_id}: no good poll yet")
                 return 1
-            rr = refresh(cfg, last, store, clock, data_dir=data_dir, config_root=croot)
+            rr = refresh(
+                cfg, last, store, clock, data_dir=data_dir, config_root=croot, registry=registry
+            )
             _say(
                 "Refresh",
                 f"{cfg.client_id}: {rr.status}" + (f" ({rr.reason})" if rr.reason else ""),
@@ -459,7 +478,9 @@ def live(args: argparse.Namespace) -> int:
             if rec.status != "ok":
                 failed = True
                 continue
-            rr = refresh(cfg, rec, store, clock, data_dir=data_dir, config_root=croot)
+            rr = refresh(
+                cfg, rec, store, clock, data_dir=data_dir, config_root=croot, registry=registry
+            )
             _say(
                 "Refresh",
                 f"{cfg.client_id}: {rr.status}" + (f" ({rr.reason})" if rr.reason else ""),

@@ -520,7 +520,10 @@ def render(
     platform = last_ok.platform
     today = now.astimezone(ZoneInfo(tz)).date()
     periods = _periods(today)
-    rows = store.rows(last_ok.poll_id)
+    # L12.1: the view's own last 7 days (today minus 6 to today), pinned at 7 whatever the
+    # poll's re-read or the engine's analysis_days, since its labels and _periods are fixed at 7
+    lo, hi = periods["period_7d"]
+    rows = [r for r in store.rows(last_ok.poll_id) if lo <= r.date <= hi]
     ads = _ads(rows, periods)
 
     event = config.conversion_event.get(platform)

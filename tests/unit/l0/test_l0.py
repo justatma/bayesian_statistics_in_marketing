@@ -49,7 +49,9 @@ def test_event_floor_matches_registry() -> None:
 
 def test_live_registry() -> None:
     r = load_live_registry()
-    assert (r.interval_seconds, r.lookback_days, r.stale_after_seconds) == (3600, 7, 7200)
+    # L12.1: amended on the record, 28-day re-read and 7-day analysis window (D55)
+    assert (r.interval_seconds, r.lookback_days, r.stale_after_seconds) == (3600, 28, 7200)
+    assert r.analysis_days == 7
     assert (r.bind, r.port, r.recordings_keep_days, r.page_refresh_seconds) == (
         "127.0.0.1",
         8765,

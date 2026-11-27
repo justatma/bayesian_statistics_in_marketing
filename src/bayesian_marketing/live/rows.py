@@ -116,11 +116,12 @@ def pointer(
 ) -> tuple[list[str], str]:
     """The run pointer for a poll: ``(row_keys, rows_sha256)`` over the versions that poll read.
     A poll with no rows gives ``([], sha256(b""))``. L12.2: ``window`` (ISO dates, inclusive)
-    keeps only versions whose ``describes`` falls in it; None keeps all (to build)."""
-    if window is not None:
-        raise NotImplementedError
-    keys = list(seen.get(poll_id, []))
+    keeps only versions whose ``describes`` falls in it; None keeps all, as before L12."""
     by_key = {r["key"]: r for r in rows}
+    keys = list(seen.get(poll_id, []))
+    if window is not None:
+        lo, hi = str(window[0]), str(window[1])  # ISO dates compare as text
+        keys = [k for k in keys if lo <= by_key[k]["describes"] <= hi]
     return keys, rows_sha256([by_key[k] for k in keys])
 
 
