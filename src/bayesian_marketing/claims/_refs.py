@@ -95,6 +95,36 @@ def run_kind(snap: Any) -> str:
     return sock.conversion_kind_of(snap)
 
 
+def resolve_client(client_ref: str) -> str:
+    """J4R.1: the engine client_id for either id a caller may hold: an engine client_id, or the
+    ``atmaos_client_id`` a config under ``BAYES_CONFIG_DIR`` (default ``configs/``) declares. An
+    id that matches nothing comes back unchanged, so the no-slots and other-client paths behave as
+    before. Raises ValueError when the id names more than one config, and never picks one."""
+    import yaml
+
+    from bayesian_marketing.live import config as live_config
+
+    root = live_config.config_root()
+    direct: set[str] = set()
+    aliased: set[str] = set()
+    for path in sorted(root.glob("*.yaml")) if root.is_dir() else []:
+        try:
+            data = yaml.safe_load(path.read_text())
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        cid = str(data.get("client_id") or path.stem)
+        if cid == client_ref:
+            direct.add(cid)
+        if data.get("atmaos_client_id") is not None and str(data["atmaos_client_id"]) == client_ref:
+            aliased.add(cid)
+    found = direct | aliased
+    if len(aliased) > 1 or len(found) > 1:
+        raise ValueError(f"{client_ref!r} names more than one client config: {sorted(found)}")
+    return found.pop() if found else client_ref
+
+
 # --- default loaders (P4, S16) ---------------------------------------------------------------
 
 

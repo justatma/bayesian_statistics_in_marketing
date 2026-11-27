@@ -418,7 +418,7 @@ def test_S25_7_notebook_subject_names_the_ad_or_campaign(env: J4REnv) -> None:
 def test_S25_7_release_format_accepts_and_checks_the_subject(env: J4REnv) -> None:
     from bayesian_marketing.notebook import release as nb_release
 
-    assert nb_release.SCHEMA == "bayes-notebook-1.1.0"
+    assert nb_release.SCHEMA == "bayes-notebook-1.2.0"
     bad = {"name": "x", "value": 1, "unit": "count", "subject": {"level": "country", "id": "x"}}
     with pytest.raises(ValueError, match="subject"):
         env.release([_nb_entry(bad)])
@@ -891,3 +891,217 @@ def test_S27_non_list_quantities_fail_the_slot_and_never_raise(
     res = env.render("{fig:nb/" + rel + f"/{X.E_LIMIT}/account_spending_limit}}", load_release=load)
     assert res["ok"] is False and res["text"] is None
     env.menu(load_release=load)  # never raises
+
+
+# ------------------------------------------------------------------ J4R.1: quantity labels
+
+WEEK = "click-through rate for the week of 7 to 13 November"
+
+
+def _labelled(label: object, **extra: object) -> dict:
+    q = {"name": "ctr_week1", "value": 0.072, "unit": "ratio",
+         "subject": {"level": "ad", "id": IMG3_ID}, "label": label}  # fmt: skip
+    q.update(extra)
+    return _nb_entry(q)
+
+
+@pytest.mark.parametrize(
+    ("form", "want"),
+    [
+        ("full", f"We looked at {IMG3}'s {WEEK} of 7.2%."),
+        ("start", f"{IMG3}'s {WEEK} is 7.2%."),
+    ],
+)
+def test_J4R1_a_label_is_the_measure_wording_in_both_forms(
+    env: J4REnv, form: str, want: str
+) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    rel = env.release([_labelled(WEEK)])
+    slot = "{fig:nb/" + rel + "/nbe_lead_client_0009/ctr_week1|" + form + "}"
+    template = f"{slot}." if form == "start" else f"We looked at {slot}."
+    res = env.render(template)
+    assert res["ok"], res["reasons"]
+    assert res["text"] == want
+
+
+def test_J4R1_a_label_on_an_account_subject_and_in_the_menu(env: J4REnv) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    label = "chance the account's best ad stays ahead on clicks"
+    q = {"name": "p_best_clicks", "value": 0.62, "unit": "probability", "subject": ACCOUNT}
+    q["label"] = label
+    rel = env.release([_nb_entry(q)])
+    items = [i for i in env.menu()["slots"] if i["release_id"] == rel]
+    assert [i["forms"] for i in items] == [
+        {
+            "full": "the chance the account's best ad stays ahead on clicks of 62%",
+            "start": "The chance the account's best ad stays ahead on clicks is 62%",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["rate {week}", "rate in % terms", "share in percent", "cost in USD", "cost in dollars",
+     "cost per $", "two\nlines", "tab\x07bell", "a" * 121, "", "   ", 5, None],
+)  # fmt: skip
+def test_J4R1_a_bad_label_is_refused_on_write(env: J4REnv, label: object) -> None:
+    with pytest.raises(ValueError, match="label"):
+        env.release([_labelled(label)])
+
+
+def test_J4R1_a_label_of_120_characters_is_accepted(env: J4REnv) -> None:
+    env.release([_labelled("a" * 120)])
+
+
+def test_J4R1_verify_refuses_a_bad_label_written_past_the_writer(env: J4REnv) -> None:
+    import json
+
+    from bayesian_marketing.notebook import release as nb_release
+
+    rel = env.release([_labelled(WEEK)])
+    folder = env.release_folder(rel)
+    entries = [json.loads(x) for x in (folder / "entries.jsonl").read_text().splitlines()]
+    entries[0]["quantities"][0]["label"] = "rate in % terms"
+    (folder / "entries.jsonl").write_bytes(
+        b"".join(nb_release.canonical(e) + b"\n" for e in entries)
+    )
+    integ = json.loads((folder / "integrity.json").read_text())
+    integ["files"]["entries.jsonl"] = nb_release.sha((folder / "entries.jsonl").read_bytes())
+    integ["release_hash"] = nb_release.release_hash(integ["files"])
+    (folder / "integrity.json").write_bytes(nb_release.canonical(integ) + b"\n")
+    with pytest.raises(ValueError, match="label"):
+        nb_release.verify(folder)
+
+
+def test_J4R1_the_renderer_fails_a_bad_label_a_loader_gives(env: J4REnv) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    rel = env.release([_labelled(WEEK)])
+
+    def load(rid: str) -> object:
+        catalog, entries, sources = env.release_files(rel)
+        entries[0]["quantities"][0]["label"] = "rate in % terms"
+        return catalog, entries, sources
+
+    res = env.render("{fig:nb/" + rel + "/nbe_lead_client_0009/ctr_week1}.", load_release=load)
+    assert res["ok"] is False and res["text"] is None
+    assert any(S.R_NAME_FIGURE in r for r in res["reasons"]), res["reasons"]
+
+
+def test_J4R1_a_1_1_0_release_still_renders_as_before_and_refuses_a_label(
+    env: J4REnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bayesian_marketing.notebook import release as nb_release
+
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    monkeypatch.setattr(nb_release, "SCHEMA", "bayes-notebook-1.1.0")
+    q = {"name": "amount_spent", "value": 750, "unit": "USD",
+         "subject": {"level": "ad", "id": IMG3_ID}}  # fmt: skip
+    rel = env.release([_nb_entry(q)])
+    folder = env.release_folder(rel)
+    assert '"schema":"bayes-notebook-1.1.0"' in (folder / "catalog.json").read_text()
+    assert nb_release.verify(folder)
+    res = env.render(f"{_nb(rel, 'amount_spent')}.")
+    assert res["text"] == f"{IMG3}'s amount spent of $750.", res
+    with pytest.raises(ValueError, match=r"1\.2\.0"):
+        env.release([_labelled(WEEK)], day="20261124")
+
+
+def test_J4R1_no_label_keeps_the_name_wording(env: J4REnv) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    q = {"name": "ctr", "value": 0.044, "unit": "ratio", "subject": {"level": "ad", "id": IMG3_ID}}
+    rel = env.release([_nb_entry(q)])
+    res = env.render(f"{_nb(rel, 'ctr')}.")
+    assert res["text"] == f"{IMG3}'s click-through rate of 4.4%.", res
+
+
+# ------------------------------------------------------------------ J4R.1: the AtmaOS client id
+
+AID = "01a1a97d-bce7-7000-8462-dc1e8af439a0"
+OTHER_AID = "01a1a97d-bce7-7000-8462-00000000beef"
+
+
+def _alias(env: J4REnv, client_id: str = CLIENT, aid: str = AID) -> None:
+    from tests.acceptance.test_J5 import LEAD
+    from tests.acceptance.test_L5 import config
+
+    kw = dict(LEAD) if client_id == CLIENT else {}
+    env.write_config(config(**{**kw, "client_id": client_id, "atmaos_client_id": aid}))
+
+
+def _same(a: dict, b: dict, drop: tuple[str, ...]) -> tuple[dict, dict]:
+    return ({k: v for k, v in a.items() if k not in drop},
+            {k: v for k, v in b.items() if k not in drop})  # fmt: skip
+
+
+def test_J4R1_either_id_gives_the_same_menu_and_rendering(env: J4REnv) -> None:
+    _alias(env)
+    run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    env.set_p_best(run, {IMG3_ID: 0.621, IMG2_ID: 0.379})
+    q = {"name": "amount_spent", "value": 750, "unit": "USD", "subject": ACCOUNT}
+    env.release([_nb_entry(q)])
+    by_slug, by_aid = env.menu(CLIENT), env.menu(AID)
+    assert by_slug["client_id"] == by_aid["client_id"] == CLIENT
+    assert (by_slug["client_ref"], by_aid["client_ref"]) == (CLIENT, AID)
+    assert by_slug["slots"] and by_slug["slots"] == by_aid["slots"]
+    assert by_slug["reasons"] == by_aid["reasons"] == []
+    template = " ".join(i["token"] for i in by_slug["slots"]) + "."
+    a, b = env.render(template, CLIENT), env.render(template, AID)
+    assert a["ok"] is True, a["reasons"]
+    assert (a["client_id"], b["client_id"], a["client_ref"], b["client_ref"]) == (
+        CLIENT, CLIENT, CLIENT, AID
+    )  # fmt: skip
+    left, right = _same(a, b, ("client_ref", "checked_at"))
+    assert left == right
+
+
+def test_J4R1_an_atmaos_id_of_another_client_is_walled(env: J4REnv) -> None:
+    _alias(env)
+    env.other_release()
+    _alias(env, X.OTHER, OTHER_AID)
+    run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    qid = env.ctr_44(run)
+    res = env.render(f"We looked at {fig_run(run, qid)}.", OTHER_AID)
+    assert res["client_id"] == X.OTHER and res["client_ref"] == OTHER_AID
+    assert res["ok"] is False and res["text"] is None
+    assert any(S.R_OTHER_CLIENT in r for r in res["reasons"]), res["reasons"]
+    assert all(i["run_id"] != run for i in env.menu(OTHER_AID)["slots"])
+
+
+def test_J4R1_two_configs_claiming_one_atmaos_id_fail_and_never_pick(env: J4REnv) -> None:
+    _alias(env)
+    env.other_release()
+    _alias(env, X.OTHER, AID)
+    run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    qid = env.ctr_44(run)
+    res = env.render(f"We looked at {fig_run(run, qid)}.", AID)
+    assert res["ok"] is False and res["text"] is None and res["slots"] == []
+    assert any(S.R_CLIENT_REF in r for r in res["reasons"]), res["reasons"]
+    menu = env.menu(AID)
+    assert menu["slots"] == [] and any(S.R_CLIENT_REF in r for r in menu["reasons"])
+    with pytest.raises(ValueError, match="more than one"):
+        R.resolve_client(AID)
+    assert env.render("Both ads are live.", CLIENT)["ok"] is True  # the slug still resolves
+
+
+def test_J4R1_an_id_naming_one_config_and_another_s_alias_fails(env: J4REnv) -> None:
+    env.other_release()
+    _alias(env, X.OTHER, CLIENT)  # the other client claims the lead client's own id
+    with pytest.raises(ValueError, match="more than one"):
+        R.resolve_client(CLIENT)
+
+
+def test_J4R1_an_unknown_id_comes_back_unchanged(env: J4REnv) -> None:
+    assert R.resolve_client("nobody_at_all") == "nobody_at_all"
+    assert R.resolve_client(CLIENT) == CLIENT
+    menu = env.menu("nobody_at_all")
+    assert (menu["client_id"], menu["client_ref"], menu["slots"]) == (
+        "nobody_at_all", "nobody_at_all", []
+    )  # fmt: skip
+
+
+def test_J4R1_the_config_field_is_optional() -> None:
+    from bayesian_marketing import core as C
+
+    base = {"client_id": "c", "timezone": "UTC", "currency": "USD", "accounts": {"meta": "1"}}
+    assert C.ClientConfig(**base).atmaos_client_id is None
+    assert C.ClientConfig(**base, atmaos_client_id=AID).atmaos_client_id == AID

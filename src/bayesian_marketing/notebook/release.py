@@ -1,5 +1,5 @@
-"""Write and verify an account notebook release (spec/notebook_format.md, bayes-notebook-1.1.0;
-1.0.0 releases still verify).
+"""Write and verify an account notebook release (spec/notebook_format.md, bayes-notebook-1.2.0;
+1.0.0 and 1.1.0 releases still verify).
 
     from bayesian_marketing.notebook.release import verify
 
@@ -18,9 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "bayes-notebook-1.1.0"
-#: Schemas ``verify`` accepts: 1.1.0 adds an optional ``subject`` on a quantity (J4R, S25 (7)).
-SCHEMAS = ("bayes-notebook-1.0.0", SCHEMA)
+SCHEMA = "bayes-notebook-1.2.0"
+#: Schemas ``verify`` accepts: 1.1.0 adds an optional ``subject`` on a quantity (J4R, S25 (7)),
+#: 1.2.0 an optional ``label`` (J4R.1).
+SCHEMAS = ("bayes-notebook-1.0.0", "bayes-notebook-1.1.0", SCHEMA)
+#: J4R.1: the longest measure wording a label may give.
+LABEL_MAX = 120
 SUBJECT_LEVELS = ("account", "campaign", "ad_set", "ad")
 KINDS = ("event", "finding", "figure", "constraint", "open")
 METHODS = ("observed", "estimated")
@@ -91,6 +94,26 @@ def _check_subject(entry_id: str, q: dict, schema: str) -> None:
         raise ValueError(f"{entry_id}: quantity subject {subj!r} has a non-string id")
 
 
+def _check_label(entry_id: str, q: dict, schema: str) -> None:
+    """A quantity's optional ``label`` (1.2.0): plain words naming the measure, at most
+    ``LABEL_MAX`` characters, held to the display-name rule of J4R S27 (no brace, no percent sign
+    or word, no currency sign, word or code, no control character or line feed)."""
+    if "label" not in q:
+        return
+    label = q["label"]
+    if schema in ("bayes-notebook-1.0.0", "bayes-notebook-1.1.0"):
+        raise ValueError(f"{entry_id}: a quantity label needs bayes-notebook-1.2.0")
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError(f"{entry_id}: quantity label {label!r} is not plain words")
+    if len(label) > LABEL_MAX:
+        raise ValueError(f"{entry_id}: quantity label is {len(label)} characters, over {LABEL_MAX}")
+    from bayesian_marketing.claims.slots import _name_states_a_figure
+
+    why = _name_states_a_figure(label)
+    if why is not None:
+        raise ValueError(f"{entry_id}: quantity label refused: {why}")
+
+
 def _check_entry(e: dict, ids: set[str], schema: str = SCHEMA) -> None:
     need = ("entry_id", "kind", "statement", "method", "date", "as_of", "basis")
     missing = [k for k in need if not e.get(k)]
@@ -111,6 +134,7 @@ def _check_entry(e: dict, ids: set[str], schema: str = SCHEMA) -> None:
         if e["method"] == "estimated" and "p50" in q and not interval:
             raise ValueError(f"{e['entry_id']}: estimated quantity without its interval")
         _check_subject(e["entry_id"], q, schema)
+        _check_label(e["entry_id"], q, schema)
 
 
 def write_release(

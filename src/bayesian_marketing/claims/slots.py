@@ -44,7 +44,8 @@ class MenuItem(TypedDict):
 
 
 class Menu(TypedDict):
-    client_id: str
+    client_id: str  # the engine client_id (J4R.1)
+    client_ref: str  # the id as the caller gave it: a client_id or an AtmaOS client id
     slots: list[MenuItem]
     reasons: list[str]  # refs that could not be read, by name
     engine_version: str
@@ -65,6 +66,8 @@ class SlotOut(TypedDict):
 
 
 class Rendered(TypedDict):
+    client_id: str  # the engine client_id (J4R.1)
+    client_ref: str  # the id as the caller gave it
     ok: bool
     text: str | None  # None whenever ok is False: never a partial rendering
     template: str
@@ -157,6 +160,8 @@ R_OTHER_CLIENT = "slot belongs to another client"
 R_BRACE = "a brace outside a slot"
 R_BAD_DATE = "date slot is not a strict ISO date or datetime"
 R_ZERO_OR_ALL = "a word stating none or all next to a measure; use a slot"
+#: J4R.1: an id that more than one client config claims.
+R_CLIENT_REF = "the client id names more than one client config"
 #: A2 to A4: the numeral rule normalises NFKC, casefolds, strips category Cf, and breaks words at
 #: whitespace, hyphens and slashes before matching whole words.
 
@@ -785,6 +790,8 @@ _NB_LABELS = {"p_best": "chance of being best"}
 PER_UNIT_MONEY = frozenset({"cpa", "cpc", "cpm", "contribution_per_click"})
 #: R7, R8: quantities that are probabilities by name, whatever their unit.
 PROBABILITY_NAMES = frozenset({"p_best", "p_exceeds"})
+#: J4R.1: the longest label a notebook quantity may give (notebook.release.LABEL_MAX).
+LABEL_MAX = 120
 #: S27: the top two p_best values this close or closer name no leader.
 CMP_CLOSE = 0.05
 
@@ -1079,13 +1086,29 @@ def _nb_value(q: dict[str, Any], kind: str) -> str:
     raise _Fail(f"{R_UNIT}: {unit!r} on quantity {q.get('name')}")
 
 
+def _nb_label(q: dict[str, Any]) -> str | None:
+    """J4R.1: a 1.2.0 quantity's own ``label``, the measure's wording in both forms. It is held
+    to the display-name rule here too, since a loader need not have verified the release."""
+    label = q.get("label")
+    if label is None:
+        return None
+    if not isinstance(label, str) or not label.strip() or len(label) > LABEL_MAX:
+        raise _Fail(f"{R_NAME_UNRENDERABLE}: quantity {q.get('name')} has a malformed label")
+    why = _name_states_a_figure(label)
+    if why is not None:
+        raise _Fail(why)
+    return label.strip()
+
+
 def _nb_fig(
     rel: _Release, entry: dict[str, Any], q: dict[str, Any], names: _Names, kind: str
 ) -> tuple[dict[str, str], SlotQuantity]:
     name = str(q.get("name") or "")
     value = _nb_value(q, kind)  # the unit first (S25 (6)), then the subject (S26 (4))
     level, eid = _nb_subject(q)
-    label = V.labels(kind)[0].get(name) or _NB_LABELS.get(name) or name.replace("_", " ")
+    label = _nb_label(q) or (
+        V.labels(kind)[0].get(name) or _NB_LABELS.get(name) or name.replace("_", " ")
+    )
     if eid is None:  # a stated account subject
         head, is_name = f"the {label}", False
     else:
@@ -1375,6 +1398,18 @@ def client_slots(
     notebook release, each with both forms rendered."""
     if not isinstance(client_id, str):
         raise TypeError("client_slots: client_id must be a str")
+    client_ref = client_id
+    try:
+        client_id = R.resolve_client(client_ref)  # J4R.1: before everything else
+    except ValueError as exc:
+        return {
+            "client_id": client_ref,
+            "client_ref": client_ref,
+            "slots": [],
+            "reasons": [f"{R_CLIENT_REF}: {exc}"],
+            "engine_version": _engine_version(),
+            "checked_at": utcnow().isoformat(),
+        }
     ctx = _ctx(client_id, load_run, load_release, load_names)
     reasons: list[str] = []
     items: list[MenuItem] = []
@@ -1447,6 +1482,7 @@ def client_slots(
         )
     return {
         "client_id": client_id,
+        "client_ref": client_ref,
         "slots": items,
         "reasons": reasons,
         "engine_version": _engine_version(),
@@ -1469,6 +1505,23 @@ def render_client_text(
         raise TypeError("render_client_text: text must be a str")
     if not isinstance(client_id, str):
         raise TypeError("render_client_text: client_id must be a str")
+    client_ref = client_id
+    try:
+        client_id = R.resolve_client(client_ref)  # J4R.1: the A1 wall compares this id
+    except ValueError as exc:
+        return {
+            "client_id": client_ref,
+            "client_ref": client_ref,
+            "ok": False,
+            "text": None,
+            "template": text,
+            "slots": [],
+            "reasons": [f"{R_CLIENT_REF}: {exc}"],
+            "lint": [],
+            "engine_version": _engine_version(),
+            "inputs_hash": inputs_hash({"text": text, "client_id": client_ref}),
+            "checked_at": utcnow().isoformat(),
+        }
     ctx = _ctx(client_id, load_run, load_release, load_names)
     reasons: list[str] = []
 
@@ -1538,6 +1591,8 @@ def render_client_text(
             pos = s.end
         out_text = "".join(pieces) + text[pos:]
     return {
+        "client_id": client_id,
+        "client_ref": client_ref,
         "ok": ok,
         "text": out_text,
         "template": text,
