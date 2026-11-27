@@ -344,3 +344,23 @@ S27 (after review3/J4R b45930d, briefed with the threat model; 10 blocking, 4 ma
 (8) Display names fail only on a brace, a percent sign or word, a currency sign or ISO code, or a control character or line feed. S25 (9)'s quantity-word rule for names and the digit rules of the second review are withdrawn: names are the client's own data, not the persona's writing.
 (9) An out-of-range value or malformed quantities fail the slot, and never raise.
 The false fails on listed words and on the lint stand, and the refusal log counts them.
+
+## Settled before the J2 and J3 build (27 Nov)
+
+These close what the J2 and J3 text left open once the code was read. None needs the owner.
+
+S28. `versioned(store, client_id)` reads through the `live.contracts.Store` contract (`polls(client_id, limit=...)` and `rows(poll_id)`), so the refresh, the export and the test fakes share one implementation. Only polls with status `ok` count. Row values are written in the stored text forms, as `live/store.py` writes them: amounts as `str(Decimal)`, dates as ISO text, `known_at` as the poll's `started_at.isoformat()`, `conversions_reported` as a float when not null (the column is REAL), ids and names as the dicts stored. Rows are taken in the order the export's query used: ad id, date, poll `started_at`, poll id. Check J2 (f): on a fixture SQLite store holding a rename, a restated figure, a confirmed version and a non-ASCII name, `versioned` gives byte-identical polls rows, `seen` and reads to the export's `polls()` as it stood at commit e983942, copied into the test as the oracle.
+
+S29. The rows' `timezone` is the one distinct non-null `timezone` among the client's ok polls. Two or more raise `ValueError`. None gives `null`. The export keeps its own refusal when there is none.
+
+S30. If `versioned` raises inside a refresh, the refresh fails (status `failed`, no run, no marker). No live run is made without its pointer.
+
+S31. `pipeline.execute` gains three keywords: `extra_dataset_hashes: Sequence[str] = ()`, `row_keys: Sequence[str] = ()` and `rows_form: str | None = None`. `dataset_hashes` becomes `sorted([*file hashes, *extra_dataset_hashes])` on both the run record and the snapshot. `row_keys` (sorted) and `rows_form` are stored on the snapshot as given and change nothing else.
+
+S32. Every posterior entry from `result_of`, below-floor entries included, gains `rows_form`, `rows_sha256` and `row_keys`. `rows_sha256` is the hex after `bayes-rows-c1:` in the snapshot's `dataset_hashes`, or `null` when there is none. `EVIDENCE_KEYS` doesn't change: the pointer reaches `observation_evidence` inside `result`.
+
+S33. Markers. The JSON is canonical (keys sorted, no spaces, UTF-8) with one trailing line feed. `written_at` is UTC ISO 8601 to the second. The temporary file is `.<name>.tmp` in the same folder, moved into place with `os.replace`. A marker that already exists for the same run or release, in `markers/` or `markers/done/`, is left untouched and the write returns its path. `snapshot_path` is absolute and resolved, `snapshot_sha256` is over the file's bytes as on disk, and `client_id` is the snapshot's. When the snapshot has no `rows_form`, the marker's `rows_form`, `rows_sha256` and `row_keys` are all `null`.
+
+S34. A marker write that fails after the run file is saved leaves the refresh `ran`, with reason `marker not written: <type>: <message>`, and the backfill writes it later. `write_release` raises if its marker can't be written; the release folder stays, and the backfill writes the marker.
+
+S35. `scripts/markers_backfill.py` covers both kinds: every run file in `data_dir()/runs` and every release folder under the notebook root (`BAYES_NOTEBOOK_DIR`, or the repository's `notebook/`) whose `verify()` passes. A release that fails `verify()` gets no marker and is named on the standard error stream. It prints the count written per kind.
