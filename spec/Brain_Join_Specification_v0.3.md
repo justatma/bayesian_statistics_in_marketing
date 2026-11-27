@@ -193,3 +193,13 @@ P6. Names in a hashed row are as of the version's first poll, and a rename is no
 On when an hourly run is a new version of a posterior claim (the Principal Architect's to settle under spec 42 FR3.2): his starting rule fits this series, with one change from what the series shows. When two ads are close, the leader by p_best can flip between hourly runs on a handful of clicks. A leader change should count only when the new leader's p_best is at least 0.5, or the change has held for a full account-local day. Otherwise a 24-a-day series makes a version on every flip.
 
 S15 (the J5 test writer). "Cost-per money at `unit_money_decimals` on both" would have changed purchase rounding, which contradicts "byte for byte unchanged". The finer rounding applies to lead runs only.
+
+## Settled after the J4 test writer (26 Nov)
+
+S16. Names. A snapshot holds no entity names today. J4 adds `RunSnapshot.entity_names` (id to name for ads, ad sets and campaigns, as the pull read them; empty on older snapshots), and the refresh fills it. For a snapshot without names, the check reads names from the notebook source objects among the refs, then from a third loader, `load_names(client_id) -> dict[str, str]`. Its default reads the live store read-only, taking the newest name per id. A name maps to one id. A name that maps to two ids is treated as unnamed.
+S17. Money precision follows the figure for every money kind, cost-per included: "$3" or "three dollars" compares at whole dollars and places on 3.35, while "$3.35" compares at cents. On a lead run, the 2-decimal display (J5) is what `should_read` and `value_at_rounding` give for cost-per.
+S18. An estimated notebook quantity is treated as marginal: it needs the caveat. An observed one needs none.
+S19. `R_UNREADABLE_FORM` covers a numeral the reader can't parse to one value: two decimal points ("3.3.5"), a decimal comma ("4,4%"), exponent form ("1e3"), or a scaled form ("$3k", "1.2M"). Each fails with that reason.
+S20. Comparatives and causal words. With a run ref, `check_narrative`'s comparative and causal checks run on the sentence against that run's bundle, and their reasons are added as sentence-level reasons. With no run ref, a comparative or causal word whose subject is an ad fails with "a comparison needs a run ref".
+S21. Newest. For a run, it's the latest `started_at` in the run record among that client's saved runs (ties broken by run id). For a release, it's the client's release with the greatest (day, n) in its id. A release named as some other release's parent is never newest.
+S22. Generic money words ("spend", "spent", "budget", "cost") don't name a measure. A measure is named only by a metric alias, or by a notebook quantity's name words or its entry's tags.

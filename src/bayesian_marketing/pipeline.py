@@ -161,6 +161,8 @@ class RunSnapshot(BaseModel):
     synthetic: bool
     # J5: None on snapshots saved before J5; read through ``socket.conversion_kind_of``.
     conversion_kind: Literal["purchase", "lead"] | None = None
+    # J4 (S16): ad, ad set and campaign id -> name as the pull read them; empty before J4
+    entity_names: dict[str, str] = {}
     manifest_id: str
     dataset_hashes: list[str]
     platform: str

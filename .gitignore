@@ -14,5 +14,5 @@ data/real/
 data/live/
 
 # Client account notebooks and the seat continuity file hold client figures; kept local (Head Engineer, 26 Nov)
-notebook/
+/notebook/
 spec/continuity.md
