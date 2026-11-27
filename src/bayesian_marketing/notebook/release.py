@@ -112,9 +112,8 @@ def write_release(
     rid = f"nb_{client_id}_{day}_{n}"
     folder = releases / rid
     folder.mkdir(parents=True)
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=root, check=True
-    ).stdout.strip()
+    got = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=root)
+    commit = got.stdout.strip() if got.returncode == 0 else "unknown"
     catalog = {
         "schema": SCHEMA,
         "release_id": rid,
