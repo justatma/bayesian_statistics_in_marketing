@@ -21,7 +21,7 @@ The rule is exact:
 4. Rows are ordered by `key`, by Unicode code point, ascending. Each serialised row is followed by one line feed (0x0A).
 5. `rows_sha256` is the lowercase hex SHA-256 of those bytes concatenated. An empty set hashes the empty string.
 6. `names` in a row are the names as they stood in the poll that first saw that version. A rename alone is not a new version, because versions are cut on figures only (`MEASURES` in the export), so a stored key's names never change. A rename shows in the change history, and in the next version's names when a figure next changes (P6).
-7. Keys are `meta:<ad id>:<YYYY-MM-DD>:v<n>`. `n` counts the distinct figure sets for that ad and day in the order the live store first saw them, starting at 1 and taken over the full history. A stored key never changes content, and a changed figure is a new key, `v<n+1>`. Arkwright's intake refuses any export that breaks this, at receive.
+7. Keys are `meta:<ad id>:<YYYY-MM-DD>:v<n>`. `n` starts at 1 and goes up by one each time a poll's figures for that ad and day differ from the previous version's, taken over the full history in poll order. A figure set that changes and then returns is a new version, not the earlier one again (S36). A stored key never changes content, and a changed figure is a new key, `v<n+1>`. Arkwright's intake refuses any export that breaks this, at receive.
 
 The reference implementation is `rows_sha256()` in `scripts/export_history.py`.
 
@@ -364,3 +364,5 @@ S33. Markers. The JSON is canonical (keys sorted, no spaces, UTF-8) with one tra
 S34. A marker write that fails after the run file is saved leaves the refresh `ran`, with reason `marker not written: <type>: <message>`, and the backfill writes it later. `write_release` raises if its marker can't be written; the release folder stays, and the backfill writes the marker.
 
 S35. `scripts/markers_backfill.py` covers both kinds: every run file in `data_dir()/runs` and every release folder under the notebook root (`BAYES_NOTEBOOK_DIR`, or the repository's `notebook/`) whose `verify()` passes. A release that fails `verify()` gets no marker and is named on the standard error stream. It prints the count written per kind.
+
+S36 (the J2 and J3 test writer, 27 Nov). (1) J1 point 7 now says what the export does: a new version whenever the figures differ from the previous version's, so a set that returns is a new key. (2) Marker files are named `<run_id>.json` and `<release_id>.json`. The ids already carry their `run_` and `nb_` prefixes, so the J3 table's `run_<run_id>` would double them. A reader that globs `run_*.json` and `nb_*.json` finds both. (3) The marker folder is `pipeline.data_dir()` at the time of the write. The refresh writes inside `data_dir_env(data_dir)`, so for a refresh that is its `data_dir` argument. (4) When S29 gives a null time zone, each read's `after_close` is null.
