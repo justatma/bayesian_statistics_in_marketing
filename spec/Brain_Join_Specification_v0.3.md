@@ -1,6 +1,6 @@
-# Brain join specification, v0.2
+# Brain join specification, v0.3
 
-26 November 2026, the Bayesian Engineer. Version 0.2 takes the blind review of v0.1 (`spec/reviews/brain_join_blind_01.md`, Sonnet: 2 blocking, 6 major, 2 minor, 14 undecided). Every point is settled in S1 to S14 at the end. None needed the owner, so nothing went to him from this review. This spec covers the engine's side of joining the engine to AtmaOS and to Imani Brooks, the AtmaOS team member who explains the engine's work to the client. It follows spec 42 FR7.2 in the AtmaOS repository and the owner's rulings: D54 here, and D676 and D677 in AtmaOS. Pieces already built are listed so the rest can be read against them. Each piece below that has a status of "to build" has an interface and checks. Nothing in it is built until the blind spec review's undecided list is answered.
+26 November 2026, the Bayesian Engineer. Version 0.2 takes the blind review of v0.1 (`spec/reviews/brain_join_blind_01.md`, Sonnet: 2 blocking, 6 major, 2 minor, 14 undecided). Every point is settled in S1 to S14 at the end. None needed the owner, so nothing went to him from this review. Version 0.3 takes the Principal Architect's note on v0.2 (26 Nov, P1 to P6 at the end). This spec covers the engine's side of joining the engine to AtmaOS and to Imani Brooks, the AtmaOS team member who explains the engine's work to the client. It follows spec 42 FR7.2 in the AtmaOS repository and the owner's rulings: D54 here, and D676 and D677 in AtmaOS. Pieces already built are listed so the rest can be read against them. Each piece below that has a status of "to build" has an interface and checks. Nothing in it is built until the blind spec review's undecided list is answered.
 
 ## Already built
 
@@ -20,11 +20,12 @@ The rule is exact:
 3. Each row is serialised with keys sorted by Unicode code point, separators `,` and `:` with no spaces, UTF-8 output, and non-ASCII characters left as they are (no `\u` escapes). This is Python's `json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`.
 4. Rows are ordered by `key`, by Unicode code point, ascending. Each serialised row is followed by one line feed (0x0A).
 5. `rows_sha256` is the lowercase hex SHA-256 of those bytes concatenated. An empty set hashes the empty string.
-6. Keys are `meta:<ad id>:<YYYY-MM-DD>:v<n>`. `n` counts the distinct figure sets for that ad and day in the order the live store first saw them, starting at 1 and taken over the full history. A stored key never changes content, and a changed figure is a new key, `v<n+1>`. Arkwright's intake refuses any export that breaks this, at receive.
+6. `names` in a row are the names as they stood in the poll that first saw that version. A rename alone is not a new version, because versions are cut on figures only (`MEASURES` in the export), so a stored key's names never change. A rename shows in the change history, and in the next version's names when a figure next changes (P6).
+7. Keys are `meta:<ad id>:<YYYY-MM-DD>:v<n>`. `n` counts the distinct figure sets for that ad and day in the order the live store first saw them, starting at 1 and taken over the full history. A stored key never changes content, and a changed figure is a new key, `v<n+1>`. Arkwright's intake refuses any export that breaks this, at receive.
 
 The reference implementation is `rows_sha256()` in `scripts/export_history.py`.
 
-Checks: (a) a fixture of three rows with known bytes gives a stated hash, and the test holds that hash. (b) The hash doesn't depend on the order the rows are given in. (c) Changing any one value in any row changes the hash. (d) Two exports of the same store give identical `polls.jsonl` and identical `rows_sha256` for every run. (e) A row with a non-ASCII ad name hashes over its UTF-8 bytes, not over `\u` escapes.
+Checks: (a) a fixture of three rows with known bytes gives a stated hash, and the test holds that hash. (b) The hash doesn't depend on the order the rows are given in. (c) Changing any one value in any row changes the hash. (d) Two exports of the same store give identical `polls.jsonl` and identical `rows_sha256` for every run. (e) A row with a non-ASCII ad name hashes over its UTF-8 bytes, not over `\u` escapes. (g) In a fixture store, an ad is renamed between two polls with its figures unchanged: both exports give the same key, the same names (the first poll's) and the same `rows_sha256`.
 
 ## J2. Row hashes in the engine's own run record (to build)
 
@@ -71,13 +72,14 @@ Signature: `bayesian_marketing.atmaos.socket.check_client_figures(text: str, ref
 
 Reading the sentence:
 
-1. **Figures.** Every number in the text is a figure, except dates, times of day, years, and run, release and entry ids. That covers percentages, money (with `$` or a currency code), plain counts and ratios. A figure written in a form the reader can't parse fails, with the reason "figure in a form the checker cannot read".
+1. **Figures.** Every number in the text is a figure, except dates, times of day, years, and run, release and entry ids. That covers percentages, money (with `$` or a currency code), plain counts and ratios. A figure written in a form the reader can't parse fails, with the reason "figure in a form the checker cannot read". Quantities in words count as figures too: spelled numbers ("three dollars", "twelve sign-ups"), fractions ("a third", "half", "a quarter"), multiples and changes ("doubled", "twice as many", "tripled", "halved") and proportions ("most of", "nearly all", "the bulk of"). A spelled number is read as its numeral and placed like any other. A fraction, multiple, change or proportion fails with "a quantity in words the checker cannot place; state the figure", unless the same sentence also gives the figures it rests on and each of them is placed (P1).
 2. **Subjects.** An ad is named by its id or its name. Names are read from the run's entity names or the notebook source objects. Matching ignores case, and treats an en dash, hyphen and spaces in a name as equal. An ad set or campaign is named the same way, and "the account" names the account.
 3. **Metric words.** The existing aliases apply, plus lead vocabulary when the client converts on leads. Whether it does is read from the client config named by the ref: a run's `client_id`, or a release catalog's `client_id`. It uses the same rule as `live.refresh._conversion_kind` (S6). Refs naming two clients fail the call. For a notebook quantity, its metric words are its `name` with underscores read as spaces, plus the entry's tags. Its subject is the ad, ad set or campaign named in the entry's statement, or the account when none is. On a lead account, "sign-up", "sign-ups", "lead" and "leads" name the conversion, "cost per sign-up" and "cost per lead" name `cpa`, "sign-up rate" names `cvr`, and the words "order" and "purchase" fail with the reason "this account converts on sign-ups, not orders". "Link clicks", "click rate" and "click-through rate" name `ctr` or the link-click count. "Spend", "spent" and "budget" name money.
-4. **Matching.** A figure is placed when one quantity among the refs has the same unit kind (percent, money, count or probability), the same subject if the sentence names one, the same metric if the sentence names one, and a value whose display at the registry's rounding equals the figure. Rounding follows the figure as written. Percent compares at the decimals the figure shows, 0 or 1, and no finer than the registry's `percent_decimals`. Cost-per money compares at `unit_money_decimals` (2). Other money compares at 2 decimals when the figure shows cents and at the registry's `money_decimals` (0) when it doesn't (S9). Counts compare whole. A probability reads either as a percent at 0 or 1 decimals, the way a person says it ("a 62% chance"), or as a decimal at `probability_decimals` (S8). An estimated quantity also accepts its q05 and q95, as an interval, and its q50 or mean. When more than one quantity in the refs fits a figure and the sentence doesn't name enough to tell them apart, the figure fails with the reason "fits more than one figure in the refs; name the ad or the measure" and lists the candidates (S10).
+4. **Matching.** A figure is placed when one quantity among the refs has the same unit kind (percent, money, count or probability), the same subject if the sentence names one, the same metric if the sentence names one, and a value whose display at the registry's rounding equals the figure. Rounding follows the figure as written. Percent compares at the decimals the figure shows, 0 or 1, and no finer than the registry's `percent_decimals`. Cost-per money compares at `unit_money_decimals` (2). Other money compares at 2 decimals when the figure shows cents and at the registry's `money_decimals` (0) when it doesn't (S9). Counts compare whole. A probability reads either as a percent at 0 or 1 decimals, the way a person says it ("a 62% chance"), or as a decimal at `probability_decimals` (S8). An estimated quantity is placed by its q50 or mean. Its q05 or q95 places only when the sentence marks it as a bound: both ends are given ("between 4.0% and 4.7%", "4.0% to 4.7%"), or a bound word stands with it ("at least", "as low as", "at most", "as high as", "no more than", "no less than", "up to"). A lone q05 or q95 spoken as the value fails, with `should_read` the median (P2). When more than one quantity in the refs fits a figure and the sentence doesn't name enough to tell them apart, the figure fails with the reason "fits more than one figure in the refs; name the ad or the measure" and lists the candidates (S10).
 5. **Status.** A figure placed on an `estimable` quantity passes. One placed on a `marginal` quantity passes only if the sentence also says that it is still an estimate. The required phrase is the registry's `caveat_marginal` or one of a new registry list, `caveat_marginal_aliases` ("still rough", "a rough estimate", "still an estimate"), anywhere in the same sentence, since a clause split must not cut it off. The list goes in `registries/phrasing.yaml` in the skeleton, and `check_narrative` doesn't read it (S7). A figure placed on a `below_floor` quantity fails, with the reason that the quantity is "not knowable yet" and the registry's `not_knowable` wording. An observed notebook quantity has no status and passes when placed.
-6. **Unplaced.** A figure no ref places fails, with the reason "not found in the refs given". It never passes silently. When a quantity of the same unit, subject and metric exists but its value differs, the result gives that quantity's value as `should_read`.
-7. **Comparatives and causal words.** These are checked as `check_narrative` checks them, against the refs' comparison, if a run ref carries one.
+6. **Unplaced.** A figure no ref places fails, with the reason "not found in the refs given; if it is derived (a difference, a total, a change), ask the engine for that quantity rather than rewording" (P5). It never passes silently. When a quantity of the same unit, subject and metric exists but its value differs, the result gives that quantity's value as `should_read`.
+7. **Currency of the ref.** For a run ref, the result says whether it is the client's newest saved run and gives the run's window end and saved time. For a notebook ref, it says whether the release is the newest for the client. A sentence resting on a ref that is not the newest passes only if it carries a date or "as of"; otherwise every figure in it fails with "the ref is not the newest; date the figure or use the newest" (P3).
+8. **Comparatives and causal words.** These are checked as `check_narrative` checks them, against the refs' comparison, if a run ref carries one.
 
 Return:
 
@@ -94,7 +96,8 @@ Return:
      "value_at_rounding": "$1,500", "should_read": "$1,500",
      "caveat_required": false, "caveat_present": false, "reasons": ["$1,600: the ref gives $1,500"]}
   ],
-  "reasons": ["$1,600: not found in the refs given"],
+  "refs": [{"ref": {"kind": "run", "run_id": "..."}, "newest": true, "window_end": "2026-11-26", "saved_at": "..."}],
+  "reasons": ["$1,600: the ref gives $1,500"],
   "engine_version": "bayesian-marketing ...",
   "inputs_hash": "<sha256 over text and refs>",
   "checked_at": "<UTC ISO 8601>"
@@ -104,6 +107,10 @@ Return:
 `value_at_rounding` is the matched quantity's value at the rounding the figure was compared at, given whenever a quantity is matched. `should_read` is the same value, given only when the figure differs from it. Both are `null` when nothing matched (S7 of the review).
 
 `passed` is true only if every figure is placed and passes and no sentence-level reason exists. A text with no figures passes with an empty `figures` list. A ref that can't be read (a missing run, a release that fails `verify()`, an unknown entry) makes the call fail with a reason naming the ref. It doesn't raise. Only a wrong argument type raises.
+
+Where it runs: the check reads the engine's files on this machine, so it works only while Imani's turn runs here. To make running it against the Brain's stored copies cheap later, the loaders are parameters: `check_client_figures(text, refs, *, load_run=None, load_release=None)`, defaulting to the engine's own file loaders (P4).
+
+What the caller does with a failure is the Head Engineer's to build: repair from `should_read`, or drop the figure, a bounded number of tries, and never send failing text. This call only reports.
 
 Checks are the acceptance tests, frozen before the build. Each runs against fixture runs and a fixture notebook release, never the live store:
 (a) "IMG3_TXT1 had a click-through rate of 4.4%, but it is still a rough estimate." with a run ref passes when IMG3's ctr is marginal at 4.4%.
@@ -119,6 +126,10 @@ Checks are the acceptance tests, frozen before the build. Each runs against fixt
 (k) "A 62% chance" and "a 0.62 chance" both place on a p_best of 0.621.
 (l) "$1,500" with refs holding both a $1,500 spending limit and a $1,500 lifetime budget, and no words naming either, fails as fitting more than one figure and lists both.
 (m) Refs from two clients fail the call.
+(n) "About three dollars a sign-up" places as $3 against a cpa whose median rounds to $3, and fails otherwise. "Sign-ups doubled" and "a third of the budget" fail as quantities in words, unless the figures they rest on are in the sentence and placed.
+(o) "The click rate is 4.7%" fails when 4.7% is the q95 and the median is 4.4%, with `should_read` "4.4%". "Between 4.0% and 4.7%" and "as high as 4.7%" pass.
+(p) A figure from a run that is not the client's newest fails in the present tense, and passes with "as of 20 November" or a date in the sentence. The same holds for a notebook entry in a superseded release.
+(q) "$200 more than last week" fails, and its reason names a derived figure.
 
 ## J5. The lead path in check_narrative (to build, a fix)
 
@@ -169,3 +180,14 @@ S13 (undecided 13). Checked: the run id is `make_id("run_", {"manifest": manifes
 S14 (undecided 14). `versioned` returns the reads as a third value.
 
 Review gap 9 (ad status as a data point, D54) belongs to the live-test state call beside J6, not to the join, and is recorded as a follow-up. Gap 10 needs no change.
+
+## The Principal Architect's note on v0.2 (26 Nov)
+
+P1. Quantities in words are figures (J4 point 1, check n).
+P2. A bound spoken as the value fails (J4 point 4, check o).
+P3. A stale ref must be dated (J4 point 7, check p).
+P4. The loaders are parameters, so the check can later run against the Brain's copies. The limit is recorded under J4.
+P5. A derived figure fails, and its reason says so, so the caller asks for the quantity (check q). The caller's repair rule is the Head Engineer's.
+P6. Names in a hashed row are as of the version's first poll, and a rename is not a new version (J1 point 6, check g). This was already the export's behaviour. Now it is stated and tested.
+
+On when an hourly run is a new version of a posterior claim (the Principal Architect's to settle under spec 42 FR3.2): his starting rule fits this series, with one change from what the series shows. When two ads are close, the leader by p_best can flip between hourly runs on a handful of clicks. A leader change should count only when the new leader's p_best is at least 0.5, or the change has held for a full account-local day. Otherwise a 24-a-day series makes a version on every flip.
