@@ -81,7 +81,7 @@ These are its exact keys: `answerable`, `units_needed`, `units_needed_marginal`,
 
 - `rule_ref` is the list `["bounds/estimability/posterior_width@v1", "test_design/max_periods@v1"]`.
 - `engine_version` is `bayesian-marketing <version>`.
-- `inputs_hash` is `core.inputs_hash(design)`, so it is stable across key order and across an int and a float of equal value (`inputs_hash` canonicalises).
+- `inputs_hash` is the design's hash under the form `bayes-design-c1` (J6.S2). `core.inputs_hash` is not used, because it writes 1 and 1.0 differently and escapes non-ASCII.
 
 Every string value is one of the closed words above, an echoed input (`unit_kind`, `currency`) or a reference.
 
@@ -167,3 +167,35 @@ J6.S1.
 3. `stopping_rule` is never sent with `max_periods` null. It is null as a whole whenever `periods_needed` is null (rule 12).
 4. AtmaOS rounds cost half up to cents, as rule 13 does.
 5. AtmaOS stores `units_needed_marginal`, `rule_ref` and `inputs_hash`, and leaves out `cost_low`, `cost_high` and `unit_kind`, which in J6 only repeat what it holds. That is AtmaOS's choice, and it changes nothing here.
+
+J6.S2 (the Arkwright Engineer and the Principal Architect, 27 Nov).
+
+1. The hash form `bayes-design-c1`. Only this rule decides it, so the replay desk computes the same hash.
+   - (a) The value is the design as received, a JSON object.
+   - (b) Normalise every value, at every depth:
+     - A bool stays a bool, and is never treated as a number.
+     - A number that is a whole value is written as an integer, so 1, 1.0 and 1e0 are all `1`.
+     - Any other number is written in the shortest form that reads back as the same IEEE-754 double. That is Python's `repr(float)` as `json.dumps` writes it: 0.2 as `0.2`, 1e-05 as `1e-05`.
+     - NaN and infinity never occur, because they are refused.
+     - null stays null.
+     - A string stays as it is.
+     - A list keeps its order.
+     - An object is normalised in the same way.
+   - (c) Serialise with keys sorted by Unicode code point at every level, with separators `,` and `:` and no spaces, and with non-ASCII left as it is (no `\u` escapes). This is Python's `json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)` applied to the normalised value.
+   - (d) `inputs_hash` is the lowercase hex SHA-256 of those UTF-8 bytes.
+
+   The reference implementation is `bayesian_marketing.test_design.reading.design_hash`. Checks:
+   - A fixture design with a non-ASCII `unit_kind`, nested `outcome`, an int and an equal float has a stated hash, and the test holds that hash.
+   - A second implementation written from this text alone gives the same hash.
+   - Key order and int against float don't change it.
+2. The call path and the rule's values. AtmaOS calls the engine's interpreter as its slot bridge does: `python -I`, JSON on stdin and stdout, an environment of `BAYES_DATA_DIR`, `HOME` and `PATH`. J6 needs nothing more than that. It reads only the registries, which it finds from the package as the slot calls do.
+
+   A second socket call, `read_test_design_rule() -> dict`, gives AtmaOS's equality test everything it needs without reaching into registry paths:
+   - `rel_half_width` and `caveat_rel_half_width` (from `bounds/estimability/posterior_width@v1`);
+   - `ratio`, the second divided by the first;
+   - `max_periods` (from `test_design/max_periods@v1`, in `registries/test_design.yaml`);
+   - `rule_ref`, the same list the reading carries;
+   - `hash_form`, which is "bayes-design-c1";
+   - `engine_version`.
+
+   Check: its values equal the registries', and `rule_ref` equals a reading's.
