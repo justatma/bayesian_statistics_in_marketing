@@ -21,6 +21,8 @@ from bayesian_marketing.core import (
 from bayesian_marketing.core.records import ClientConfig
 from bayesian_marketing.data_contract.connectors import meta
 from bayesian_marketing.live import horizon as live_horizon
+from bayesian_marketing.live import markers
+from bayesian_marketing.live import rows as live_rows
 from bayesian_marketing.live.contracts import Clock, LiveRow, PollRecord, RefreshRecord, Store
 
 ONE_AD = "one ad, nothing to compare"
@@ -96,6 +98,9 @@ def _outcome(
             conversion_kind=_conversion_kind(config),
             horizon_basis=basis,
         )
+        # J2 (S30): no live run without its pointer; a raise here fails the refresh
+        history, seen, _ = live_rows.versioned(store, poll_rec.client_id)
+        row_keys, sha = live_rows.pointer(history, seen, poll_rec.poll_id)
         with data_dir_env(data_dir):
             ctx = pipeline.execute(
                 manifest,
@@ -103,8 +108,17 @@ def _outcome(
                 manifest_dir=config_root,
                 pulls=[pull],
                 entity_names=_entity_names(rows),
+                extra_dataset_hashes=[live_rows.HASH_PREFIX + sha],
+                row_keys=row_keys,
+                rows_form=live_rows.ROWS_FORM,
             )
-        return "ran", None, ctx.result.run.run_id
+            run_id = ctx.result.run.run_id
+            # J3: the last step after the run is saved; a failure leaves the run ran (S34)
+            try:
+                markers.engine_run_marker(run_id)
+            except Exception as exc:
+                return "ran", f"marker not written: {type(exc).__name__}: {exc}", run_id
+        return "ran", None, run_id
     except GateFailure as exc:
         return "skipped", _gate_text(exc), None
     except Exception as exc:  # C2: refresh never raises

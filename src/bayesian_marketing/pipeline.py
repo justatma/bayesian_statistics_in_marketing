@@ -979,7 +979,9 @@ def execute(
     rows_form: str | None = None,
 ) -> RunContext:
     """The pipeline with its context. ``pulls`` given (shadow replay) skips the read stage.
-    ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else."""
+    ``entity_names`` (J4, S16) is stored on the snapshot as given; it changes nothing else.
+    ``extra_dataset_hashes`` (J2, S31) joins the file hashes in ``dataset_hashes`` on the run
+    record and the snapshot; ``row_keys`` (sorted) and ``rows_form`` go on the snapshot only."""
     started = utcnow()
     manifest_dir = Path(manifest_dir) if manifest_dir is not None else Path.cwd()
     start, end = request.window
@@ -1208,7 +1210,8 @@ def execute(
         "seed": seed,
     }
     config_hash = inputs_hash(configuration)
-    dataset_hashes = sorted(f.sha256 for f in manifest.files)
+    # J2 (S31): the live refresh adds its bayes-rows-c1 hash; every other caller adds nothing
+    dataset_hashes = sorted([*(f.sha256 for f in manifest.files), *extra_dataset_hashes])
     record = RunRecord(
         run_id=run_id,
         started_at=started,
@@ -1239,6 +1242,8 @@ def execute(
         synthetic=manifest.synthetic,
         manifest_id=manifest.manifest_id,
         dataset_hashes=dataset_hashes,
+        row_keys=sorted(row_keys),
+        rows_form=rows_form,
         platform=platform,
         window=(start, end),
         as_of=as_of,

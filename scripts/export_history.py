@@ -46,82 +46,20 @@ import sqlite3
 import sys
 import urllib.parse
 import urllib.request
-from datetime import UTC, date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+
+from bayesian_marketing.live.rows import MEASURES, ROWS_FORM, canonical, rows_sha256, versioned  # noqa: F401
+from bayesian_marketing.live.store import SqliteStore
 
 REPO = Path(__file__).resolve().parents[1]
 LIVE = REPO / "data" / "live"
 GRAPH = "https://graph.facebook.com/v21.0/"
-MEASURES = (
-    "impressions", "clicks", "spend_amount", "spend_currency", "conversions_reported",
-    "conversions_observed", "revenue_amount", "revenue_currency", "attribution_window", "objective",
-)
 BACKFILL_FIELDS = (
     "account_id,campaign_id,adset_id,ad_id,account_name,campaign_name,adset_name,ad_name,objective,"
     "impressions,reach,frequency,inline_link_clicks,clicks,spend,account_currency,actions,"
     "action_values,attribution_setting"
 )
-
-
-def canonical(obj) -> bytes:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-
-def ids(entity_ids: dict) -> dict:
-    return {k: entity_ids.get(k) for k in ("account", "campaign", "ad_set", "ad")}
-
-
-ROWS_FORM = "bayes-rows-c1"
-POLL_READS: list[dict] = []
-
-
-def rows_sha256(rows: list[dict]) -> str:
-    """bayes-rows-c1: canonical JSON per row, a line feed after each, rows in key order."""
-    return hashlib.sha256(b"".join(canonical(r) + b"\n" for r in sorted(rows, key=lambda r: r["key"]))).hexdigest()
-
-
-def polls(store: sqlite3.Connection, client_id: str, tz: str) -> tuple[list[dict], dict[str, list[str]]]:
-    """The versioned rows, and for each poll the keys of the versions it saw."""
-    q = """SELECT r.*, p.started_at FROM rows r JOIN polls p USING (poll_id)
-           WHERE r.client_id = ? ORDER BY r.ad_id, r.date, p.started_at, r.poll_id"""
-    out, last, version, current, seen, reads = [], {}, {}, {}, {}, []
-    zone = ZoneInfo(tz)
-    for r in store.execute(q, (client_id,)):
-        k = (r["ad_id"], r["date"])
-        figures = {m: r[m] for m in MEASURES}
-        close = datetime.combine(date.fromisoformat(r["date"]) + timedelta(days=1), time(0), zone)
-        read = {
-            "key": f"read:{r['poll_id']}:{r['ad_id']}:{r['date']}",
-            "describes": r["date"], "known_at": r["started_at"], "timezone": tz,
-            "poll_id": r["poll_id"], "ad": r["ad_id"],
-            "after_close": datetime.fromisoformat(r["started_at"]) >= close,
-        }
-        if last.get(k) == figures:
-            seen.setdefault(r["poll_id"], []).append(current[k])
-            reads.append({**read, "version_key": current[k]})
-            continue
-        version[k] = version.get(k, 0) + 1
-        key = f"meta:{r['ad_id']}:{r['date']}:v{version[k]}"
-        out.append({
-            "key": key,
-            "restates": f"meta:{r['ad_id']}:{r['date']}:v{version[k] - 1}" if version[k] > 1 else None,
-            "describes": r["date"],
-            "known_at": r["started_at"],
-            "timezone": tz,
-            "poll_id": r["poll_id"],
-            "platform": r["platform"],
-            **ids(json.loads(r["entity_ids_json"])),
-            "names": json.loads(r["entity_names_json"]),
-            "link_clicks": r["clicks"],
-            **{m: r[m] for m in MEASURES if m != "clicks"},
-        })
-        last[k] = figures
-        current[k] = key
-        reads.append({**read, "version_key": key})
-        seen.setdefault(r["poll_id"], []).append(key)
-    POLL_READS[:] = reads
-    return out, {p: sorted(v) for p, v in seen.items()}
 
 
 def runs(
@@ -263,9 +201,13 @@ def main(client_id: str, since: str | None = None) -> Path:
     if len(zones) != 1:
         raise RuntimeError(f"expected one account time zone, found {sorted(zones)}")
     tz = zones.pop()
-    poll_rows, seen = polls(store, client_id, tz)
+    live = SqliteStore.open(LIVE / "live.sqlite", read_only=True)
+    try:
+        poll_rows, seen, reads = versioned(live, client_id)
+    finally:
+        live.close()
     files = {"polls.jsonl": poll_rows, "runs.jsonl": runs(store, client_id, tz, poll_rows, seen),
-             "reads.jsonl": sorted(POLL_READS, key=lambda r: r["key"])}
+             "reads.jsonl": sorted(reads, key=lambda r: r["key"])}
     account = store.execute(
         "SELECT account_id FROM polls WHERE client_id = ? LIMIT 1", (client_id,)
     ).fetchone()["account_id"].removeprefix("act_")
