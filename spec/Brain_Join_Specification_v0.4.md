@@ -332,3 +332,15 @@ S26. (1) Same slot, same text: a slot renders byte for byte the same whatever el
 - removing single separators (".", "-", "'", space) between single letters inside a run, so that "t.e.n" becomes "ten";
 - glued forms, meaning a listed word preceded or followed by another listed word or by "percent", "ish", "something" or "fold".
 Stop there. (3) The plain-letter Roman numeral check is dropped, because "I", "mix", "did", "civil" and "vivid" are made of Roman letters. Unicode numeral glyphs (category Nl) are refused by the character allow list. Review cases that expected "XII", "IV", "MMXXVI", "vii", "Xii" or "X.I.I" to fail now expect them to pass, and each such edit is recorded. (4) S25 (7)'s default "without it, the subject is the account" is withdrawn. A quantity with no subject fails its slot.
+
+S27 (after review3/J4R b45930d, briefed with the threat model; 10 blocking, 4 major, 5 minor).
+(1) Inside slots, per-unit money (cpa, cpc, cpm, contribution per click, and any notebook money under 100) renders at cents, whatever the account's kind. A nonzero value that would display as zero renders "less than <smallest step>".
+(2) The word list gains halve, halfway, quadruple, quintuple, treble, twin, dollar, buck, penny, cent, quid and grand, with their forms.
+(3) A4 gains the measure verbs (click, convert, sign up, buy), "not … any" anywhere in the sentence, and nobody, neither, whole, entire, everything and "all of".
+(4) "An" before a vowel-sound figure. A name's trailing punctuation is dropped mid-sentence.
+(5) cmp with the top two p_best within 0.05, or a leader under 0.5, renders "neither ad leads yet on <unit>, still a rough estimate".
+(6) Duplicate quantity names in one notebook entry are refused on write and verify, and fail the slot.
+(7) CR, tab and no-break spaces are normalised to LF or space before the character check. Slack's formatting marks (* _ ~ ` • >) and U+2011 are allowed.
+(8) Display names fail only on a brace, a percent sign or word, a currency sign or ISO code, or a control character or line feed. S25 (9)'s quantity-word rule for names and the digit rules of the second review are withdrawn: names are the client's own data, not the persona's writing.
+(9) An out-of-range value or malformed quantities fail the slot, and never raise.
+The false fails on listed words and on the lint stand, and the refusal log counts them.
