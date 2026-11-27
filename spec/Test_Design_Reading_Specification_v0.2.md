@@ -114,8 +114,7 @@ The reading adds keys AS5's `BayesTestReading` doesn't name: `units_needed_margi
 
 E1's figures change.
 - Two arms at 1,900 units: `units_needed` = 2 × 859 = 1,718, not 1,717.
-- Five arms: the Bonferroni split at alpha 0.0125 raises `units_needed`, so the 4,292 figure is regenerated.
-- The word stays `not_knowable_yet`, and `coarser_comparison` with 2 still holds or is regenerated.
+- Five arms at 0.2, a 0.30 baseline, `fewer` at an effect of 0.2, at 1,900 units: `units_needed` 6,100 (per arm 1,220 at alpha 0.0125), `units_needed_marginal` 1,410. So the word is `marginal`, not `not_knowable_yet`, with `coarser_comparison` 2 (four arms need 4,584 and three 3,120; two need 1,718). The Arkwright Engineer worked these out and the engine's function confirms them (27 Nov).
 - The cost leaves out the control when `holdout` is true.
 - `periods_needed` includes the enrolment days.
 
