@@ -218,7 +218,7 @@ def _held_fields(
         k = H.quantity_key(
             "ad", ad, name, H.run_kind(s.conversion_kind, s.synthetic, s.client_id), s.metric
         )
-        value = got.get(k)
+        value = H.lookup(got, k)
         if value is None:
             why = f"held status not available: no held status for {name} of ad {ad}"
     out: dict[str, Any] = {"held_status": value, "fit_route": _fit_route(s)}

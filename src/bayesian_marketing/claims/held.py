@@ -44,6 +44,17 @@ def decision_key(kind: str, metric: str) -> HeldKey:
     return ("decision", "", "", str(kind), str(metric))
 
 
+def lookup(held: dict[HeldKey, str], k: HeldKey) -> str | None:
+    """The held status of ``k`` in one run's result, matched on every part but the kind. A run's
+    keys share one kind, so this is unique; it lets a caller find the entry without repeating the
+    series' kind rule (review/J7 F1)."""
+    if k in held:
+        return held[k]
+    level, sid, name, _kind, metric = k
+    got = [v for (a, b, c, _k, e), v in held.items() if (a, b, c, e) == (level, sid, name, metric)]
+    return got[0] if len(got) == 1 else None
+
+
 def run_kind(conversion_kind: str | None, synthetic: bool, client_id: str) -> str:
     """The conversion kind in a held key: the snapshot's own, and for one saved before J5 the
     renderer's R9 rule (a synthetic run is "purchase"; else the client config's, else "lead" if
@@ -175,18 +186,24 @@ def _raw(
 
 
 class _Kinds:
-    """``run_kind`` per run, the client's fallback read once per call."""
+    """The kind in a held key, per run, never read from a later run (review/J7 F1, S42): the
+    run's own; for one saved before J5, the client config's, else the kind the latest earlier run
+    of the series stated, else "purchase". Called in series order."""
 
     def __init__(self, client: str) -> None:
+        from bayesian_marketing.claims import _refs as R
+
         self.client = client
-        self._fallback: str | None = None
+        self._config = R.config_kind(client)
+        self._last: str | None = None
 
     def __call__(self, d: dict[str, Any]) -> str:
-        if d.get("conversion_kind") is not None or d.get("synthetic"):
-            return run_kind(d.get("conversion_kind"), bool(d.get("synthetic")), self.client)
-        if self._fallback is None:
-            self._fallback = run_kind(None, False, self.client)
-        return self._fallback
+        if d.get("synthetic"):
+            return "purchase" if d.get("conversion_kind") is None else str(d["conversion_kind"])
+        if d.get("conversion_kind") is not None:
+            self._last = str(d["conversion_kind"])
+            return self._last
+        return self._config or self._last or "purchase"
 
 
 def _started_at() -> dict[str, dt.datetime]:

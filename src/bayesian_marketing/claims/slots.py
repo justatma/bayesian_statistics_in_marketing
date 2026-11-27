@@ -1031,7 +1031,7 @@ def _held_of(held: dict, k: tuple[str, ...], raw: str, what: str) -> str:
     above raw is taken down to raw, which is never above it by construction."""
     from bayesian_marketing.claims import held as H
 
-    got = held.get(k)
+    got = H.lookup(held, k)  # type: ignore[arg-type]
     if got not in H.ORDER:
         raise _Fail(f"{R_UNKNOWN_SLOT}: no held status for {what}")
     return min(str(got), raw, key=H.rank)
