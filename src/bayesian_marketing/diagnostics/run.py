@@ -337,7 +337,12 @@ def run_diagnostics(state: FunnelState, data: FunnelData) -> DiagnosticsReport:
 def divergences_only(report: DiagnosticsReport) -> bool:
     """S40 (1): G3 fails on divergences alone: ``n_divergences`` is a number above
     ``divergences_max`` and every other G3 check passes. A None ``n_divergences`` is False."""
-    raise NotImplementedError
+    n = report.n_divergences
+    if n is None or not math.isfinite(float(n)):
+        return False
+    if float(n) <= int(_threshold("divergences_max")):  # type: ignore[call-overload]
+        return False
+    return not _g3_reasons(report.model_copy(update={"n_divergences": 0}))
 
 
 def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
@@ -348,6 +353,22 @@ def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
     finite. A ``non-finite draws in <col>`` PPC key is a breach with that reason. Never raises on
     a report.
     """
+    reasons = _g3_reasons(report)
+    passed = not reasons
+    out = report.model_copy(update={"passed": passed})
+    res = GateResult(
+        gate="G3",
+        passed=passed,
+        blocking=True,
+        reasons=reasons,
+        inputs_hash=inputs_hash(report.model_copy(update={"passed": None})),
+        checked_at=utcnow(),
+    )
+    return out, res
+
+
+def _g3_reasons(report: DiagnosticsReport) -> list[str]:
+    """G3's breaches on ``report``, one reason each; empty when it passes."""
     reasons: list[str] = []
     rhat_max = float(_threshold("rhat_max"))  # type: ignore[arg-type]
     ess_bulk_min = float(_threshold("ess_bulk_min"))  # type: ignore[arg-type]
@@ -386,15 +407,4 @@ def g3(report: DiagnosticsReport) -> tuple[DiagnosticsReport, GateResult]:
             reasons.append(stage)
         elif not math.isfinite(p) or p < lo or p > hi:
             reasons.append(f"PPC misfit in stage {stage}: p-value {p} outside [{lo}, {hi}]")
-
-    passed = not reasons
-    out = report.model_copy(update={"passed": passed})
-    res = GateResult(
-        gate="G3",
-        passed=passed,
-        blocking=True,
-        reasons=reasons,
-        inputs_hash=inputs_hash(report.model_copy(update={"passed": None})),
-        checked_at=utcnow(),
-    )
-    return out, res
+    return reasons

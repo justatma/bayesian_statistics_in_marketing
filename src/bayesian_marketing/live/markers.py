@@ -68,13 +68,15 @@ def engine_run_marker(run_id: str) -> Path:
 
 
 def fit_route(snap: dict[str, Any]) -> dict[str, Any]:
-    """S39 (9): ``{"kind", "step", "try"}`` from a snapshot's JSON. ``try`` stays null until J8
-    records ``fit_attempts``."""
+    """S39 (9): ``{"kind", "step", "try"}`` from a snapshot's JSON. ``try`` is the try of the
+    accepted attempt in J8's ``fit_attempts``, null when none was accepted or the run
+    predates J8."""
     route = snap.get("route") or {}
+    accepted = next((a for a in snap.get("fit_attempts") or [] if a.get("passed")), None)
     return {
         "kind": route.get("kind"),
         "step": (snap.get("configuration") or {}).get("fit_step"),
-        "try": None,
+        "try": None if accepted is None else accepted.get("try"),
     }
 
 
