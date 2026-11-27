@@ -1,5 +1,7 @@
 # Jovannah (client). No secrets here: the token lives in the keys file as META_ACCESS_TOKEN.
 client_id: jovannah
+# AtmaOS's id for this client (J4R.1): Imani's runtime names her client by it.
+atmaos_client_id: 01a1a97d-bce7-7000-8462-dc1e8af439a0
 timezone: America/New_York
 currency: USD
 economics_path: economics/jovannah.json
