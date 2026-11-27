@@ -97,12 +97,33 @@ def _outcome(
             horizon_basis=basis,
         )
         with data_dir_env(data_dir):
-            ctx = pipeline.execute(manifest, request, manifest_dir=config_root, pulls=[pull])
+            ctx = pipeline.execute(
+                manifest,
+                request,
+                manifest_dir=config_root,
+                pulls=[pull],
+                entity_names=_entity_names(rows),
+            )
         return "ran", None, ctx.result.run.run_id
     except GateFailure as exc:
         return "skipped", _gate_text(exc), None
     except Exception as exc:  # C2: refresh never raises
         return "failed", f"{type(exc).__name__}: {exc}", None
+
+
+NAMED_LEVELS = ("campaign", "ad_set", "ad")
+
+
+def _entity_names(rows: list[LiveRow]) -> dict[str, str]:
+    """J4 (S16): id -> name for the ads, ad sets and campaigns the pull read, the latest day's
+    name when a name changed within the pull."""
+    names: dict[str, str] = {}
+    for r in sorted(rows, key=lambda r: r.date):
+        for level in NAMED_LEVELS:
+            eid, name = r.entity_ids.get(level), r.entity_names.get(level)
+            if eid and name:
+                names[str(eid)] = str(name)
+    return names
 
 
 def _conversion_kind(config: ClientConfig) -> str:
