@@ -571,3 +571,5 @@ L12.6 Checks, replacing (a) and (e) and adding:
 - (h) The refresh and the export compute the pointer through `rows.pointer`.
 - (i) A pre-L12 7-day poll refreshes exactly as before.
 - (j) The multi-page 28-day replay.
+
+L12.7 (the L12 test writer, 27 Nov, tests 8330b82). (1) `tests/acceptance/test_L2.py` line 266 pins a 7-day poll window from the real registry. It is amended on the record to 28 days, like `test_l0.py` line 52. (2) The comment in `registries/live.yaml` changes with the values. (3) Follow-up M2, recorded: `versioned()` and `spend_to_date` read every stored row on every refresh. After L12 the store grows by about 4,500 rows a day. At 1,785 versions, `versioned` takes 0.21 s. M2 builds incremental versioning, carrying the last version per (ad, day) forward, when `versioned` or a refresh's whole duration first passes 5 s on live. Until then the hourly job measures it: the refresh logs `versioned`'s seconds.
