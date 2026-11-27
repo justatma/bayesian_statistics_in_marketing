@@ -209,6 +209,11 @@ def test_J4R_review2_name_that_states_a_figure_renders(env: J4REnv, run: str, na
         # S26 (3) sets this differently: no plain-letter Roman numeral check, in names too.
         assert res["ok"] is True, res["reasons"]
         return
+    if name in ("Top 10 ads", "Save50", "Ten2", "IMG3 x2"):
+        # S27 sets these differently: a display name is the client's own data, so digits and
+        # quantity words in it render; only a percent or currency rule fails a name.
+        assert res["ok"] is True, res["reasons"]
+        return
     assert refused(res), repr(res["text"])
 
 

@@ -103,6 +103,9 @@ def _check_entry(e: dict, ids: set[str], schema: str = SCHEMA) -> None:
             raise ValueError(f"{e['entry_id']}: basis {b} not in sources or role not allowed")
     if not any(b["role"] == "primary" for b in e["basis"]):
         raise ValueError(f"{e['entry_id']}: no primary basis")
+    names = [q.get("name") for q in e.get("quantities", [])]
+    if len(names) != len(set(names)):  # J4R S27: one name per entry, so a slot is one figure
+        raise ValueError(f"{e['entry_id']}: two quantities of one name")
     for q in e.get("quantities", []):
         interval = all(k in q for k in ("p05", "p95", "level"))
         if e["method"] == "estimated" and "p50" in q and not interval:

@@ -57,8 +57,9 @@ def test_no_hits(text: str) -> None:
 
 @pytest.mark.parametrize(
     "ch",
-    ["\t", "\r", " ", "×", "÷", "ƀ", "а", "#", "+", "=", "_", "{", "@"],
-)
+    ["\u00d7", "\u00f7", "\u0180", "\u0430", "#", "+", "=", "{", "@", "\u2028", "\x07",
+     "\U0001f44d", "|", "[", "\u00a8"],
+)  # fmt: skip
 def test_S25_1_characters_outside_the_set_fail_by_code_point(ch: str) -> None:
     reasons = S._numeral_reasons(f"a{ch}b")
     assert any(S.R_CHARACTER in r and f"U+{ord(ch):04X}" in r for r in reasons), reasons
@@ -154,8 +155,9 @@ def test_S25_5_money_half_up() -> None:
     [
         ("USD", 1500, "$1,500"),
         ("usd", 1500, "$1,500"),
-        ("EUR", 20, "€20"),
-        ("CHF", 20, "20 CHF"),
+        ("EUR", 20, "\u20ac20.00"),
+        ("CHF", 20, "20.00 CHF"),
+        ("EUR", 2000, "\u20ac2,000"),
         ("count", 12.5, "13"),
         ("ratio", 0.044, "4.4%"),
         ("probability", 0.62, "62%"),
@@ -176,7 +178,7 @@ def test_S25_6_other_units_fail(unit: str) -> None:
 
 def test_S25_6_lead_cost_per_in_cents() -> None:
     assert S._nb_value({"name": "cpa", "value": 12, "unit": "USD"}, "lead") == "$12.00"
-    assert S._nb_value({"name": "cpa", "value": 12, "unit": "USD"}, "purchase") == "$12"
+    assert S._nb_value({"name": "cpa", "value": 12, "unit": "USD"}, "purchase") == "$12.00"
 
 
 @pytest.mark.parametrize(
@@ -207,7 +209,7 @@ def test_S25_7_malformed_subject_fails(subject: object) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["Promo {date:2026-01-01}", "Save 50% today", "Price $5", "Three ads", "Ad​Two", "Ad #2"],
+    ["Promo {date:2026-01-01}", "Save 50% today", "Price $5", "Ad\u200bTwo", "USD promo"],
 )
 def test_S25_9_name_stating_a_figure(name: str) -> None:
     assert S.R_NAME_FIGURE in (S._name_states_a_figure(name) or "")
@@ -475,7 +477,7 @@ def test_S25_10_forged_run_file_is_unreadable_as_a_ref(env: J4REnv) -> None:
 
 def test_S25_9_name_stating_a_figure_fails_every_slot_it_is_in(env: J4REnv) -> None:
     run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
-    env.set_names(run, {IMG3_ID: "Three for one", IMG2_ID: IMG2_NAME})
+    env.set_names(run, {IMG3_ID: "Save 50% now", IMG2_ID: IMG2_NAME})
     qid = env.ctr_44(run)
     for text in (name_slot(IMG3_ID), fig_run(run, qid)):
         res = env.render(f"{text}.")
@@ -548,10 +550,12 @@ def test_R7_R8_run_p_exceeds_is_guarded(env: J4REnv) -> None:
 @pytest.mark.parametrize(
     ("q", "want"),
     [
-        ({"name": "amount_spent", "value": -0.001, "unit": "USD"}, "$0"),
-        ({"name": "lift", "value": -0.0004, "unit": "ratio"}, "0.0%"),
-        ({"name": "n", "value": -0.4, "unit": "count"}, "0"),
-        ({"name": "amount_spent", "value": -5, "unit": "USD"}, "-$5"),
+        ({"name": "amount_spent", "value": -0.001, "unit": "USD"}, "less than $0.01 below zero"),
+        ({"name": "lift", "value": -0.0004, "unit": "ratio"}, "less than 0.1% below zero"),
+        ({"name": "n", "value": -0.4, "unit": "count"}, "less than 1 below zero"),
+        ({"name": "amount_spent", "value": -5, "unit": "USD"}, "-$5.00"),
+        ({"name": "amount_spent", "value": 0, "unit": "USD"}, "$0.00"),
+        ({"name": "lift", "value": -0.0, "unit": "ratio"}, "0.0%"),
     ],
 )
 def test_R23_R24_no_minus_on_zero(q: dict, want: str) -> None:
@@ -571,18 +575,22 @@ def test_R25_R26_names_that_cannot_be_rendered(name: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["Save 50 dollars", "Top 10 ads", "Save50", "Ten2", "FiftyPercentOff", "IMG3 x2", "Over9",
-     "Up to 30", "Ad 7"],
+    ["Save 50 dollars", "FiftyPercentOff", "50% off", "Price $5", "USD promo", "Promo {x}",
+     "Ad\u200bTwo", "Ad\x07", "Ten basis points", "Two bucks"],
 )  # fmt: skip
-def test_R6_names_that_state_a_figure(name: str) -> None:
+def test_S27_names_fail_only_on_percent_currency_braces_and_controls(name: str) -> None:
     assert S.R_NAME_FIGURE in (S._name_states_a_figure(name) or ""), name
 
 
 @pytest.mark.parametrize(
-    "name", ["IMG3_TXT1", "IMG2_TXT1 \u2013 Updated.", "Spring Xii", "Promo B2"]
-)
-def test_R6_names_with_digits_inside_a_word_pass(name: str) -> None:
-    assert S._name_states_a_figure(name) is None
+    "name",
+    ["IMG3_TXT1", "IMG2_TXT1 \u2013 Updated.", "Spring Xii", "Promo B2", "Top 10 ads", "Save50",
+     "Ten2", "IMG3 x2", "Over9", "Up to 30", "Ad 7", "Ad 2", "Spring | Video A",
+     "[Prospecting] Spring", "Single Image Spring", "Spring \U0001f525", "Three ads", "Ad #2"],
+)  # fmt: skip
+def test_S27_client_names_render(name: str) -> None:
+    """S27: names are the client's own data; R6's extra digit rules are withdrawn."""
+    assert S._name_states_a_figure(name) is None, name
 
 
 def test_R9_kind_from_the_runs_before_the_purchase_default(env: J4REnv) -> None:
@@ -696,3 +704,190 @@ def test_S26_1_every_menu_slot_renders_the_same_alone_and_beside_every_other(
             rows = res["slots"]
             assert rows[0]["rendered"] == alone[i["token"]], (i["token"], j["token"])
             assert rows[1]["rendered"] == alone[j["token"]], (i["token"], j["token"])
+
+
+# ------------------------------------------------------------------ S27, the third review
+
+
+@pytest.mark.parametrize(
+    ("name", "x", "want"),
+    [
+        ("cpa", 0.43, "$0.43"),
+        ("cpc", 1.5, "$1.50"),
+        ("cpm", 0.4, "$0.40"),
+        ("contribution_per_click", 0.35, "$0.35"),
+        ("contribution", 1234.5, "$1,235"),
+    ],
+)
+def test_S27_per_unit_money_at_cents_whatever_the_kind(name: str, x: float, want: str) -> None:
+    assert S._fmt_money(x, "USD", S._money_decimals(name)) == want
+
+
+@pytest.mark.parametrize(
+    ("value", "want"), [(0.4, "$0.40"), (99.99, "$99.99"), (100, "$100"), (1500, "$1,500")]
+)
+def test_S27_notebook_money_under_100_at_cents(value: float, want: str) -> None:
+    q = {"name": "amount_spent", "value": value, "unit": "USD"}
+    assert S._nb_value(q, "purchase") == want
+
+
+@pytest.mark.parametrize(
+    ("fn", "x", "want"),
+    [
+        (S._fmt_percent, 0.0004, "less than 0.1%"),
+        (S._fmt_percent, 0.00004, "less than 0.1%"),
+        (S._fmt_percent, 0.0, "0.0%"),
+        (S._fmt_count, 0.3, "less than 1"),
+        (S._fmt_count, 0.0, "0"),
+        (S._fmt_ratio, 0.001, "less than 0.01"),
+    ],
+)
+def test_S27_a_nonzero_value_never_shows_as_zero(fn: object, x: float, want: str) -> None:
+    assert fn(x) == want  # type: ignore[operator]
+
+
+def test_S27_less_than_money_and_no_about_before_it() -> None:
+    assert S._fmt_money(0.004, "USD", 2) == "less than $0.01"
+    forms = S._forms("X's rate", True, "less than 0.1%", "marginal", "")
+    assert forms["full"] == f"X's rate of less than 0.1%, {S.ROUGH}"
+    assert forms["start"] == f"X's rate is less than 0.1%, {S.ROUGH}"
+
+
+@pytest.mark.parametrize("x", [1e30, 10**40, float("1e300")])
+def test_S27_a_value_beyond_decimal_precision_fails_the_slot(x: float) -> None:
+    with pytest.raises(S._Fail, match=S.R_VALUE):
+        S._fmt_money(x, "USD", 0)
+
+
+@pytest.mark.parametrize(
+    ("shown", "want"),
+    [("8%", "an"), ("11%", "an"), ("18%", "an"), ("80%", "an"), ("85%", "an"), ("89%", "an"),
+     ("800", "an"), ("$8", "an"), ("11,000", "an"), ("18,500", "an"), ("1%", "a"), ("62%", "a"),
+     ("90%", "a"), ("180", "a"), ("1,800", "a"), ("more than 99%", "a"), ("less than 1%", "a")],
+)  # fmt: skip
+def test_S27_the_article(shown: str, want: str) -> None:
+    assert S._article(shown) == want
+
+
+@pytest.mark.parametrize("word", S.QUANTITY_WORDS_S27)
+def test_S27_the_list_gains(word: str) -> None:
+    assert word in S.quantity_word_forms()
+    assert S._word_hits(f"We saw {word} today."), word
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Hi Sam,\r\nBoth ads ran.", "Hi Sam,\rBoth ads ran.", "Hi Sam,\tboth ads ran.",
+     "Both\u00a0ads ran.", "Both\u202fads ran.", "*Both* ads ran.", "_Both_ ads ran.",
+     "~Both~ ads ran.", "`Both` ads ran.", "\u2022 Both ads ran.", "> Both ads ran.",
+     "Sign\u2011ups are tracked."],
+)  # fmt: skip
+def test_S27_pasted_characters_and_slack_marks_pass(text: str) -> None:
+    assert S._numeral_reasons(text) == [], text
+
+
+@pytest.mark.parametrize("ch", ["\U0001f44d", "\U0001f525", "\u2764"])
+def test_S27_emoji_stay_refused(ch: str) -> None:
+    assert any(S.R_CHARACTER in r for r in S._numeral_reasons(f"Both ads ran {ch}"))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Nobody clicked.", "Neither ad converted.", "<A> did not get any clicks.",
+     "<A> didn't get any sign-ups.", "<A> did not convert.", "<A> has not converted.",
+     "Nobody bought.", "<A> took the whole spend.", "The entire spend was on <A>.",
+     "Everything went to <A>.", "All of the spend went to <A>."],
+)  # fmt: skip
+def test_S27_A4_more_ways_to_state_zero_or_the_whole(env: J4REnv, text: str) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    res = env.render(text.replace("<A>", name_slot(IMG3_ID)))
+    assert res["ok"] is False
+    assert any(S.R_ZERO_OR_ALL in r for r in res["lint"]), res
+
+
+@pytest.mark.parametrize(
+    "text", ["None of this changes your plan.", "Each ad is live, and neither is paused."]
+)
+def test_S27_A4_still_passes_without_a_measure(env: J4REnv, text: str) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    assert env.render(text)["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("p_best", "neither"),
+    [
+        ({IMG3_ID: 0.52, IMG2_ID: 0.48}, True),
+        ({IMG3_ID: 0.525, IMG2_ID: 0.475}, True),
+        ({IMG3_ID: 0.5, IMG2_ID: 0.5}, True),
+        ({IMG3_ID: 0.45, IMG2_ID: 0.30}, True),
+        ({IMG3_ID: 0.56, IMG2_ID: 0.44}, False),
+        ({IMG3_ID: 0.621, IMG2_ID: 0.379}, False),
+    ],
+)
+def test_S27_cmp_names_no_leader_when_close_or_under_half(
+    env: J4REnv, p_best: dict, neither: bool
+) -> None:
+    run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    env.set_p_best(run, p_best)
+    for form in ("full", "start"):
+        res = env.render("{cmp:run/" + run + "|" + form + "}.")
+        assert res["ok"], res["reasons"]
+        if neither:
+            assert "either ad leads yet on clicks, still a rough estimate" in res["text"]
+            assert IMG3 not in res["text"] and "%" not in res["text"], res["text"]
+        else:
+            assert IMG3 in res["text"] and "leads" in res["text"], res["text"]
+
+
+def test_S27_cmp_drops_the_name_s_stop_and_says_an(env: J4REnv) -> None:
+    run = env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    env.set_p_best(run, {IMG3_ID: 0.2, IMG2_ID: 0.8})
+    full = env.render("{cmp:run/" + run + "}.")["text"]
+    start = env.render("{cmp:run/" + run + "|start}.")["text"]
+    assert (
+        full == "IMG2_TXT1 \u2013 Updated, which leads on clicks with an 80% chance of being best."
+    )
+    assert start == "IMG2_TXT1 \u2013 Updated leads on clicks, with an 80% chance of being best."
+    assert env.render(f"The ad {name_slot(IMG2_ID)} is live.")["text"] == (
+        f"The ad {IMG2_NAME} is live."  # a name slot keeps the full name
+    )
+
+
+def test_S27_duplicate_names_refused_by_writer_and_verifier_and_failed_by_the_renderer(
+    env: J4REnv,
+) -> None:
+    from bayesian_marketing.notebook import release as nb_release
+
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    q = [{"name": "amount_spent", "value": v, "unit": "USD", "subject": ACCOUNT} for v in (1, 2)]
+    entry = X._entry("nbe_lead_client_0009", "figure", "Two.", "observed", "account", quantities=q)
+    with pytest.raises(ValueError, match="two quantities of one name"):
+        env.release([dict(entry)])
+    with pytest.raises(ValueError, match="two quantities of one name"):
+        nb_release._check_entry(entry, {b["source_id"] for b in entry["basis"]})
+    rel = env.release()
+
+    def load(rid: str) -> object:
+        catalog, _, sources = env.release_files(rel)
+        return catalog, [entry], sources
+
+    res = env.render(_nb(rel, "amount_spent") + ".", load_release=load)
+    assert res["ok"] is False
+    assert any(S.R_DUPLICATE in r for r in res["reasons"]), res["reasons"]
+    assert all("amount_spent" not in i["token"] for i in env.menu(load_release=load)["slots"])
+
+
+@pytest.mark.parametrize("quantities", [5, "x", {"name": "a"}])
+def test_S27_non_list_quantities_fail_the_slot_and_never_raise(
+    env: J4REnv, quantities: object
+) -> None:
+    env.lead_run_at(X.START_OLD, X.WINDOW_OLD)
+    rel = env.release()
+
+    def load(rid: str) -> object:
+        catalog, _, sources = env.release_files(rel)
+        return catalog, [{"entry_id": X.E_LIMIT, "quantities": quantities}], sources
+
+    res = env.render("{fig:nb/" + rel + f"/{X.E_LIMIT}/account_spending_limit}}", load_release=load)
+    assert res["ok"] is False and res["text"] is None
+    env.menu(load_release=load)  # never raises

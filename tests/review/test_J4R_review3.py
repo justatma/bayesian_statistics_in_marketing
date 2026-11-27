@@ -171,9 +171,10 @@ def test_J4R_review3_two_quantities_of_one_name_in_one_entry_share_one_menu_toke
     e = X._entry(
         f"nbe_{CLIENT}_0001", "figure", "Spend by ad.", "observed", "account", quantities=q
     )
-    env.release([e])
-    toks = [i["token"] for i in env.menu()["slots"] if i["token"].startswith("{fig:nb")]
-    assert len(toks) == len(set(toks)), toks
+    # S27 sets this differently: write_release refuses two quantities of one name in one entry
+    # (and verify refuses them; the renderer fails such a slot), so the release is never written.
+    with pytest.raises(ValueError, match="two quantities of one name"):
+        env.release([e])
 
 
 # ------------------------------------------------------------------ blocking: honest figures that pass
@@ -253,13 +254,16 @@ def test_J4R_review3_a4_misses_the_whole_stated_as_whole_or_entire(
 def test_J4R_review3_a_best_ad_so_far_sentence_is_linted(env: J4REnv, run: str) -> None:
     """"Your best ad so far is {name:...}." fails the comparative lint on "best"."""
     res = env.render(f"Your best ad so far is {A}.")
-    assert res["ok"], res["reasons"]
+    # S27 sets this differently: the lint's false fails stand (the Principal Architect); the
+    # refusal log counts them.
+    assert refused(res), repr(res["text"])
 
 
 def test_J4R_review3_offering_help_with_an_ad_is_linted(env: J4REnv, run: str) -> None:
     """"I can help with {name:...} if you like." fails the causal lint on "help"."""
     res = env.render(f"I can help with {A} if you like.")
-    assert res["ok"], res["reasons"]
+    # S27 sets this differently: the lint's false fails stand; the refusal log counts them.
+    assert refused(res), repr(res["text"])
 
 
 @pytest.mark.parametrize(
@@ -280,6 +284,10 @@ def test_J4R_review3_ordinary_writing_with_a_pasted_character_is_refused(
     """Honest sentences with a CRLF, tab, no-break space, asterisk, emoji or U+2011 are refused
     by the character allow list."""
     res = env.render(text)
+    if "\U0001f44d" in text:
+        # S27 sets this differently: emoji stay refused by the character allow list.
+        assert refused(res), repr(res["text"])
+        return
     assert res["ok"], res["reasons"]
 
 
@@ -298,7 +306,9 @@ def test_J4R_review3_ordinary_sentences_with_a_listed_word_are_refused(
 ) -> None:
     """Sentences with no figure in them fail on "one", "second", "most" and "few"."""
     res = env.render(text)
-    assert res["ok"], res["reasons"]
+    # S27 sets this differently: the list stays strict (the Principal Architect), and these
+    # false fails stand; the refusal log counts them.
+    assert refused(res), repr(res["text"])
 
 
 @pytest.mark.parametrize(

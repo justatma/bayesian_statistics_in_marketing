@@ -180,16 +180,22 @@ ROUGH = "still a rough estimate"
 #: S25 (1): the reason for a character outside the allowed set, and the set itself.
 R_CHARACTER = "a character outside the allowed set"
 ALLOWED_PUNCTUATION = ".,;:!?'\"()-/&\u2019\u2018\u201c\u201d\u2013\u2014\u2026"
+#: S27: Slack's formatting marks and the non-breaking hyphen.
+ALLOWED_MARKS = "*_~`\u2022>\u2011"
 ALLOWED_CHARACTERS: frozenset[str] = frozenset(
     [chr(c) for c in range(ord("A"), ord("Z") + 1)]
     + [chr(c) for c in range(ord("a"), ord("z") + 1)]
     + [chr(c) for c in range(0x00C0, 0x0180) if c not in (0x00D7, 0x00F7)]
     + [" ", "\n"]
     + list(ALLOWED_PUNCTUATION)
+    + list(ALLOWED_MARKS)
 )
 #: S25 (9): a display name may also hold digits and underscores ("IMG3_TXT1"), inside its slot only.
-NAME_EXTRA_CHARACTERS: frozenset[str] = frozenset("0123456789_")
 R_NAME_FIGURE = "a name that states a figure"
+#: S27: a value Decimal cannot hold at its rounding, or a malformed quantity.
+R_VALUE = "a value that cannot be rendered"
+#: S27: one entry giving one quantity name twice.
+R_DUPLICATE = "two quantities of one name in one entry"
 #: R25, R26: a name of punctuation only, or holding a line feed.
 R_NAME_UNRENDERABLE = "a name that cannot be rendered"
 #: R15, R16, R17, R11: a subject the renderer cannot name.
@@ -261,6 +267,36 @@ _FOREIGN_TEXT = """
     dezasseis dezessete dezassete dezoito dezenove dezanove vinte cem
 """
 FOREIGN_NUMBER_WORDS: tuple[str, ...] = tuple(_FOREIGN_TEXT.split())
+#: S27: the words the list gains after the third review.
+QUANTITY_WORDS_S27: tuple[str, ...] = (
+    "halve",
+    "halved",
+    "halving",
+    "halfway",
+    "quadruple",
+    "quadrupled",
+    "quintuple",
+    "quintupled",
+    "treble",
+    "trebled",
+    "twin",
+    "twins",
+    "dollar",
+    "dollars",
+    "buck",
+    "bucks",
+    "penny",
+    "pennies",
+    "cent",
+    "cents",
+    "quid",
+    "grand",
+)
+#: S27: currency words a display name may not hold (names keep quantity words).
+NAME_CURRENCY_WORDS: frozenset[str] = frozenset(
+    {"dollar", "dollars", "buck", "bucks", "penny", "pennies", "cent", "cents", "quid",
+     "euro", "euros"}
+)  # fmt: skip
 
 # --- the numeral rule's word forms -----------------------------------------------------------
 
@@ -340,6 +376,7 @@ _OTHER_FORMS = (
 def quantity_word_forms() -> frozenset[str]:
     """Every word form the numeral rule refuses, from ``QUANTITY_WORDS`` and S25 (4)."""
     out = set(QUANTITY_WORDS) | set(_OTHER_FORMS) | set(QUANTITY_WORDS_S25)
+    out |= set(QUANTITY_WORDS_S27)
     out |= {unicodedata.normalize("NFKC", w).casefold() for w in FOREIGN_NUMBER_WORDS}
     for w in _NUMBER_WORDS:
         out.add(_PLURAL.get(w, w + "s"))
@@ -439,10 +476,19 @@ def _word_hits(text: str) -> list[str]:
     return hits
 
 
+_PREMAP = str.maketrans({"\t": " ", "\u00a0": " ", "\u202f": " "})
+
+
+def _premap(text: str) -> str:
+    """S27: CR and CRLF read as LF, a tab and the no-break spaces as a space, before the checks."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").translate(_PREMAP)
+
+
 def _numeral_reasons(text: str) -> list[str]:
     """The numeral rule on the text with the slots removed, one reason per thing refused, each
     quoting it (A6): every character outside the allowed set by code point (S25 (1), on the raw
     text, before any fold), then the words."""
+    text = _premap(text)
     out: list[str] = []
     seen: set[str] = set()
     for ch in text:
@@ -453,33 +499,32 @@ def _numeral_reasons(text: str) -> list[str]:
     return out
 
 
-#: R6: a token ending in digits after one of these states a figure ("x2", "Save50", "top 10").
-_DIGIT_LEADS = ("x", "top", "save", "over")
-_LETTER_DIGIT_RE = re.compile(r"(?<=[^\W\d_])(?=\d)|(?<=\d)(?=[^\W\d_])")
+_PERCENT_IN_NAME = ("percent", "pct", "basis point", "per cent")
 
 
 def _name_states_a_figure(name: str) -> str | None:
-    """S25 (9), R6, R25, R26: why a display name cannot be rendered, or None. Digits stay allowed
-    inside a token with letters ("IMG3_TXT1"), never as a word of their own."""
-    if "\n" in name or not any(c.isalnum() for c in name):
+    """Why a display name cannot be rendered, or None. S27 relaxes S25 (9) and R6 to the threat
+    model: names are the client's own data as Meta holds it, so digits, brackets, "|", emoji and
+    quantity words are allowed. A name fails only on a brace, a percent sign or word, a currency
+    sign, word or ISO code, a control or format character, or a line feed (R26); one with no
+    letter or digit at all cannot be rendered (R25)."""
+    if "\n" in name or "\r" in name or not any(c.isalnum() for c in name):
         return f"{R_NAME_UNRENDERABLE}: {name!r}"
-    bad = [c for c in name if c not in ALLOWED_CHARACTERS and c not in NAME_EXTRA_CHARACTERS]
-    if bad:
-        return f"{R_NAME_FIGURE}: {name!r} holds {_char_reason(bad[0])}"
-    words = _word_hits(_LETTER_DIGIT_RE.sub(" ", name))
-    if words:
-        return f"{R_NAME_FIGURE}: {name!r} holds {words[0]!r}"
-    tokens = _WORD_RE.findall(_fold(name))
-    for i, tok in enumerate(tokens):
-        if tok.isdigit():
+    for c in name:
+        cat = unicodedata.category(c)
+        if c in "{}" or c in PERCENT_SIGNS or c in "\u2031" or cat in ("Sc", "Cc", "Cf"):
+            return f"{R_NAME_FIGURE}: {name!r} holds {_char_reason(c)}"
+    for m in _WORD_RE.finditer(unicodedata.normalize("NFKC", name)):
+        if m.group(0) in ISO_4217:
+            return f"{R_NAME_FIGURE}: {name!r} holds {m.group(0)!r}"
+    folded = _fold(name)
+    tokens = _WORD_RE.findall(folded)
+    for tok in tokens:
+        if tok in NAME_CURRENCY_WORDS or any(w in tok for w in ("percent", "pct")):
             return f"{R_NAME_FIGURE}: {name!r} holds {tok!r}"
-        m = re.fullmatch(r"([^\W\d_]*)(\d+)", tok)
-        if m is None:
-            continue
-        before = m.group(1) or (tokens[i - 1] if i else "")
-        up_to = i >= 2 and not m.group(1) and tokens[i - 2 : i] == ["up", "to"]
-        if before in _DIGIT_LEADS or up_to:
-            return f"{R_NAME_FIGURE}: {name!r} holds {tok!r}"
+    for phrase in ("per cent", "basis point"):
+        if _phrase_hit(tokens, phrase):
+            return f"{R_NAME_FIGURE}: {name!r} holds {phrase!r}"
     return None
 
 
@@ -736,10 +781,12 @@ _LEVEL_WORDS = {"ad": "ad", "ad_set": "ad set", "campaign": "campaign"}
 _LEVELS = ("account", "campaign", "ad_set", "ad")
 _CMP_UNITS = {"clicks": "clicks", "orders": "orders", "leads": "sign-ups", "money": "value"}
 _NB_LABELS = {"p_best": "chance of being best"}
-#: J5: on a lead account these show at ``unit_money_decimals``.
-_LEAD_UNIT_MONEY = frozenset({"cpa", "cpc"})
+#: S27: per-unit money, at ``unit_money_decimals`` in every slot.
+PER_UNIT_MONEY = frozenset({"cpa", "cpc", "cpm", "contribution_per_click"})
 #: R7, R8: quantities that are probabilities by name, whatever their unit.
 PROBABILITY_NAMES = frozenset({"p_best", "p_exceeds"})
+#: S27: the top two p_best values this close or closer name no leader.
+CMP_CLOSE = 0.05
 
 
 def _rounding() -> dict[str, int]:
@@ -752,15 +799,33 @@ def _half_up(x: float | Decimal, decimals: int) -> Decimal:
     return d.quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
 
 
-def _fixed(x: float | Decimal, decimals: int) -> str:
-    q = _half_up(x, decimals)
-    if q == 0:  # R23, R24: no "-0" or "-$0"
+def _shown(x: float | Decimal, decimals: int, wrap: Callable[[str], str] = str) -> str:
+    """One figure at its rounding, wrapped in its sign or unit. S27: a nonzero value that would
+    show as zero says "less than" the smallest step; a value Decimal cannot hold fails the slot;
+    zero never carries a minus sign (R23, R24)."""
+    try:
+        d = x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+        q = _half_up(d, decimals)
+    except (ArithmeticError, ValueError, OverflowError) as exc:
+        raise _Fail(f"{R_VALUE}: {x!r} ({type(exc).__name__})") from None
+    if q == 0 and d != 0:
+        step = wrap(f"{Decimal(1).scaleb(-decimals):,.{decimals}f}")
+        return f"less than {step}" if d > 0 else f"less than {step} below zero"
+    if q == 0:
         q = abs(q)
-    return f"{q:,.{decimals}f}"
+    return wrap(f"{q:,.{decimals}f}")
+
+
+def _fixed(x: float | Decimal, decimals: int) -> str:
+    return _shown(x, decimals)
 
 
 def _fmt_percent(fraction: float) -> str:
-    return _fixed(Decimal(repr(float(fraction))) * 100, _rounding()["percent_decimals"]) + "%"
+    try:
+        d = Decimal(repr(float(fraction))) * 100
+    except (ArithmeticError, ValueError, OverflowError) as exc:
+        raise _Fail(f"{R_VALUE}: {fraction!r} ({type(exc).__name__})") from None
+    return _shown(d, _rounding()["percent_decimals"], lambda s: s + "%")
 
 
 def _fmt_probability(p: float) -> str:
@@ -774,20 +839,35 @@ def _fmt_probability(p: float) -> str:
 
 
 def _fmt_count(x: float) -> str:
-    return _fixed(x, 0)
+    return _shown(x, 0)
 
 
 def _fmt_ratio(x: float) -> str:
-    return _fixed(x, _rounding()["probability_decimals"])
+    return _shown(x, _rounding()["probability_decimals"])
 
 
-def _money_decimals(name: str, kind: str) -> int:
+def _money_decimals(name: str, value: float | None = None) -> int:
+    """S27: a per-unit amount renders at cents whatever the account's kind (a slot is not a
+    report, so J5's byte-for-byte rule for purchase reports does not bind it): cpa, cpc, cpm,
+    contribution per click, and any notebook amount under 100."""
     r = _rounding()
-    return (
-        r["unit_money_decimals"]
-        if kind == "lead" and name in _LEAD_UNIT_MONEY
-        else r["money_decimals"]
-    )
+    if name in PER_UNIT_MONEY or (value is not None and abs(value) < 100):
+        return r["unit_money_decimals"]
+    return r["money_decimals"]
+
+
+def _fmt_money(x: float, currency: str | None, decimals: int) -> str:
+    return _shown(x, decimals, lambda s: _money(currency, s))
+
+
+def _article(shown: str) -> str:
+    """S27: "an" before a figure whose spoken form starts with a vowel sound: 8, 11, 18 and
+    80 to 89, and their thousands; "a" otherwise, "less than" and "more than" included."""
+    m = re.match(r"[^\d]*?(\d[\d,]*)", shown)
+    if m is None or shown.startswith(("less", "more")):
+        return "a"
+    lead = m.group(1).split(",")[0]
+    return "an" if lead.startswith("8") or lead in ("11", "18") else "a"
 
 
 def _money(currency: str | None, shown: str) -> str:
@@ -854,7 +934,9 @@ def _forms(
     elif status in (None, "estimable"):
         full, start = f"{head} of {value}", f"{head} is {value}"
     else:  # marginal, or a status this renderer does not know: the caveat stays
-        full, start = f"{head} of about {value}, {ROUGH}", f"{head} is about {value}, {ROUGH}"
+        about = "" if str(value).startswith(("less than", "more than")) else "about "
+        full = f"{head} of {about}{value}, {ROUGH}"
+        start = f"{head} is {about}{value}, {ROUGH}"
     return {"full": full + as_of, "start": _start(start, is_name) + as_of}
 
 
@@ -898,7 +980,7 @@ def _run_fig(run: _Run, q: Any, names: _Names) -> dict[str, str]:
         elif q.name in V.RATE_NAMES:
             value = _fmt_percent(x)
         elif q.name in V.MONEY_NAMES:
-            value = _money(snap.currency, _fixed(x, _money_decimals(str(q.name), run.kind)))
+            value = _fmt_money(x, snap.currency, _money_decimals(str(q.name)))
         else:
             value = _fmt_ratio(x)
     return _forms(
@@ -933,15 +1015,22 @@ def _cmp(run: _Run, names: _Names) -> tuple[dict[str, str], SlotQuantity]:
         }, quantity
     if not _finite(p):
         raise _Fail(f"{R_UNKNOWN_SLOT}: run {snap.run_id} has no p_best for its leader")
-    subj, is_name = _subject("ad", leader, names)
     unit = _CMP_UNITS.get(comp.unit, str(comp.unit))
     if run.kind == "lead" and comp.unit == "orders":
         unit = "sign-ups"
+    ranked = sorted((v for v in comp.p_best.values() if _finite(v)), reverse=True)
+    if p < 0.5 or (len(ranked) > 1 and ranked[0] - ranked[1] <= CMP_CLOSE + 1e-12):
+        # S27: too close to call, or no leader past one half: no ad is named
+        neither = f"neither ad leads yet on {unit}, {ROUGH}"
+        return {"full": neither + as_of, "start": _start(neither, False) + as_of}, quantity
+    subj, is_name = _subject("ad", leader, names)
+    subj = re.sub(r"[\s.!?,;:]+$", "", subj)  # S27: no stop of the name mid-sentence
     pct = _fmt_probability(p)
-    caveat = f", {ROUGH}" if status != "estimable" or p < 0.5 else ""
+    a = _article(pct)
+    caveat = f", {ROUGH}" if status != "estimable" else ""
     return {
-        "full": f"{subj}, which leads on {unit} with a {pct} chance of being best{caveat}{as_of}",
-        "start": _start(f"{subj} leads on {unit}, with a {pct} chance of being best", is_name)
+        "full": f"{subj}, which leads on {unit} with {a} {pct} chance of being best{caveat}{as_of}",
+        "start": _start(f"{subj} leads on {unit}, with {a} {pct} chance of being best", is_name)
         + caveat
         + as_of,
     }, quantity
@@ -975,15 +1064,15 @@ def _nb_value(q: dict[str, Any], kind: str) -> str:
     ):  # R7, R8: the guard on every probability
         return _fmt_probability(x / 100 if unit == "percent" else x)
     if len(unit) == 3 and unit.isascii() and unit.upper() in ISO_4217:
-        return _money(unit, _fixed(x, _money_decimals(str(q.get("name")), kind)))
+        return _fmt_money(x, unit, _money_decimals(str(q.get("name")), x))
     if unit == "count":
         return _fmt_count(x)
     if unit == "ratio":
         return _fmt_percent(x)
     if unit == "percent":
-        return _fixed(x, _rounding()["percent_decimals"]) + "%"
+        return _shown(x, _rounding()["percent_decimals"], lambda v: v + "%")
     if unit == "days":
-        if float(x) != int(x):  # R18
+        if not math.isfinite(float(x)) or float(x) != int(x):  # R18
             raise _Fail(f"{R_UNIT}: {x!r} days is not a whole number")
         shown = _fmt_count(x)
         return f"{shown} day" if shown == "1" else f"{shown} days"
@@ -1027,9 +1116,12 @@ def _nb_quantity(s: _Slot, ctx: _Ctx) -> tuple[_Release, dict[str, Any], dict[st
     if entry is None:
         raise _Fail(f"{R_UNKNOWN_SLOT}: entry {s.entry_id} is not in release {s.release_id}")
     quantities = entry.get("quantities") or []
-    q = next(
-        (q for q in quantities if isinstance(q, dict) and q.get("name") == s.quantity_name), None
-    )
+    if not isinstance(quantities, list):  # S27: fails the slot, never raises
+        raise _Fail(f"{R_VALUE}: entry {s.entry_id} has quantities that are not a list")
+    hits = [q for q in quantities if isinstance(q, dict) and q.get("name") == s.quantity_name]
+    if len(hits) > 1:
+        raise _Fail(f"{R_DUPLICATE}: {s.quantity_name} in entry {s.entry_id}")
+    q = hits[0] if hits else None
     if q is None:
         raise _Fail(
             f"{R_UNKNOWN_SLOT}: no quantity {s.quantity_name} in entry {s.entry_id} "
@@ -1107,7 +1199,27 @@ _ZERO_OR_ALL = (
     "not one",
     "not any",
     "neither",
-)  # R30 added the last seven
+    "whole",
+    "entire",
+    "everything",
+    "all of",
+)  # R30 added "nobody" to "neither", S27 the last four
+#: S27: zero or the whole said of an ad itself ("Everything went to {ad}").
+_WHOLE_OF_AN_AD = ("everything", "nothing", "whole", "entire", "all of")
+#: S27: the measure verbs A4 reads beside the nouns.
+MEASURE_VERBS: tuple[str, ...] = (
+    "click",
+    "clicked",
+    "clicking",
+    "convert",
+    "converted",
+    "sign up",
+    "signed up",
+    "signing up",
+    "buy",
+    "bought",
+)
+_NOT_ANY_RE = re.compile(r"(?:(?<!\w)not|n't)(?!\w).*(?<!\w)any(?!\w)")
 #: R27: the lint's own comparative and causal words, beside the registry's lexicons.
 LINT_EXTRA_WORDS: tuple[str, ...] = (
     "outshine",
@@ -1146,6 +1258,7 @@ _MEASURE_WORDS = (
     "purchases",
     "signed up",
     "signing up",
+    *MEASURE_VERBS,
 )
 
 
@@ -1209,9 +1322,18 @@ def _lint(masked: str, slots: list[_Slot], rows: list[SlotOut], names: _Names) -
             for word in dict.fromkeys(_lexicon_hits(low, phr)):
                 out.append(f"{R_COMPARATIVE}: {word!r} in {shown!r}")
         zero = [w for w in _ZERO_OR_ALL if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", norm)]
+        if _NOT_ANY_RE.search(norm):  # S27: "not ... any" anywhere in the sentence
+            zero.append("not any")
         measure = _has_phrase(norm, measures)
+        verbs = "|".join(re.escape(v) for v in MEASURE_VERBS)
+        negated = re.search(rf"(?:(?<!\w)not|n't)\s+(?:\w+\s+)?(?:{verbs})(?!\w)", norm)
+        if negated:  # "did not convert": a zero said with a measure verb
+            out.append(f"{R_ZERO_OR_ALL}: {negated.group(0)!r} in {shown!r}")
         if zero and measure:
             out.append(f"{R_ZERO_OR_ALL}: {zero[0]!r} with {measure!r} in {shown!r}")
+        whole = [w for w in zero if w in _WHOLE_OF_AN_AD]
+        if whole and names_an_ad and not measure:
+            out.append(f"{R_ZERO_OR_ALL}: {whole[0]!r} said of an ad in {shown!r}")
     return list(dict.fromkeys(out))
 
 
@@ -1269,11 +1391,15 @@ def client_slots(
             candidates.append(_parse_slot(f"{{cmp:run/{run_id}}}", 0, 0))
     if isinstance(rel, _Release) and rel.client == client_id:
         for e in rel.entries:
-            for q in e.get("quantities") or []:
-                if isinstance(q, dict) and q.get("name"):
-                    candidates.append(
-                        _parse_slot(f"{{fig:nb/{rel_id}/{e.get('entry_id')}/{q['name']}}}", 0, 0)
-                    )
+            quantities = e.get("quantities") or []
+            if not isinstance(quantities, list):  # S27: a malformed entry lists nothing
+                continue
+            for name in dict.fromkeys(
+                str(q["name"]) for q in quantities if isinstance(q, dict) and q.get("name")
+            ):  # a duplicated name is one token, and its render fails (S27)
+                candidates.append(
+                    _parse_slot(f"{{fig:nb/{rel_id}/{e.get('entry_id')}/{name}}}", 0, 0)
+                )
     ads: list[str] = []
     if isinstance(run, _Run) and run.snap.client_id == client_id:
         ad_ids = [str(v) for v in run.snap.variants.values()]
@@ -1285,7 +1411,7 @@ def client_slots(
     for s in fig_slots:
         try:
             out = _render_slot(s, ctx, names)
-        except _Fail:
+        except Exception:  # a slot the render would refuse is not listed; never a raise
             continue
         q = out.quantity
         items.append(
@@ -1369,6 +1495,8 @@ def render_client_text(
                     out = _render_slot(s, ctx, names)
                 except _Fail as exc:
                     s.reasons.append(str(exc))
+                except Exception as exc:  # S27: only a wrong argument type raises
+                    s.reasons.append(f"{R_VALUE}: {type(exc).__name__}: {exc}")
         if s.run_id is not None and isinstance(ctx.runs.get(s.run_id), _Run):
             clients.append(str(ctx.runs[s.run_id].snap.client_id))  # type: ignore[union-attr]
         if s.release_id is not None and isinstance(ctx.releases.get(s.release_id), _Release):
