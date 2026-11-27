@@ -701,3 +701,20 @@ def render_client_text(
             load_held=load_held,
         )
     )
+
+
+# ------------------------------------------------------------------------------- test design (J6)
+
+
+def read_test_design(design: dict) -> dict:
+    """J6: read a proposed test. See ``test_design.reading.read_test_design``."""
+    from bayesian_marketing.test_design.reading import read_test_design as _read
+
+    return _read(design)
+
+
+def read_test_design_rule() -> dict:
+    """J6.S2 (2): the rule's registry values, for AtmaOS's equality test."""
+    from bayesian_marketing.test_design.reading import read_test_design_rule as _rule
+
+    return _rule()
