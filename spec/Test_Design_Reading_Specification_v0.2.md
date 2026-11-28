@@ -208,3 +208,10 @@ J6.S4 (the integrator, 27 Nov). `max_periods` lives in code, not in a new regist
 - `read_test_design_rule()` still returns `max_periods`, so AtmaOS's equality test reads it from there as before.
 - Rule 11 (b) and check (m) read `MAX_PERIODS`. Check (m)'s second half patches the constant instead of a fixture registry.
 - Check: adding J6 leaves `registries.versions()` unchanged, and so leaves every run's config hash unchanged.
+
+J6.S5 (the J6 test writer, 27 Nov, tests 2aa76b0).
+1. Check (c)'s band and rule 7's "about 0.24 to 0.28" were wrong. Under the engine's formula, the marginal size runs to about 0.19 of `units_needed` for `fewer` at effects of 0.25 and above (0.188 at a 0.03 baseline and an effect of 0.4), and to about 0.215 at a 0.5 baseline. Check (c) holds exact equality with the formula (N at `smallest_effect × ratio`) over its grid. The band is only the description of what that gives, about 0.19 to 0.28, and is not itself a check. The note for AtmaOS's interim "half" rule stands.
+2. Check (f)'s example. 0.7 and 0.3 can't catch a missing 1e-9, because `n / 0.3` never rounds above the integer for n up to 20,000. The cases that do are a share of 0.35 (714 / 0.35 = 2040.0000000000002 in doubles) and rule 13's `1 − share_control` (6,940 × (1 − 0.7) = 2082.0000000000005). Check (f) holds those two.
+3. `rule_ref`'s second entry ends in the package version alone: `engine:test_design.reading.MAX_PERIODS@0.2.0.dev0`, which is `bayesian_marketing.__version__`. That's the form the Arkwright Engineer has pinned. `engine_version` keeps its "bayesian-marketing <version>" form, which has a space, as the other socket calls do.
+4. When `remedy` is null, `remedy_amount` is null.
+5. E2 is two equal arms, a 0.10 baseline, `more` at 0.2, on 180 units. E3 is two equal arms, a 0.40 baseline, `fewer` at 0.2, on 850 units. Both use alpha 0.05 and power 0.8 and come from AtmaOS's AS5 key. No flow is given for either, so both remedies are `larger_group` with the total `units_needed`. AtmaOS's key still carries the old shortfall amounts and is being regenerated (For AtmaOS).
