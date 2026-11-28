@@ -335,9 +335,9 @@ def _quantities(
     s: pipeline.RunSnapshot, held: tuple[dict | None, str | None]
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     """J9 (1) to (3), (6), (8) to (11), S45, S46: every measure of every variant, keyed by
-    variant and name, each entry the ``_posterior_entry`` for its name plus ``unit``, ``label``
-    and ``attribution_window``; and the quantities no variant can key, or a later one of an (ad,
-    name), in quantity order (S48 (1))."""
+    variant and name, each entry the ``_posterior_entry`` for its name plus ``unit``, ``label``,
+    ``attribution_window`` and ``applies`` (J9.1); and the quantities no variant can key, or a
+    later one of an (ad, name), in quantity order (S48 (1))."""
     from bayesian_marketing.claims import held as H
     from bayesian_marketing.claims import vocab
 
@@ -350,6 +350,11 @@ def _quantities(
             "unit": _unit(name, kind, s.currency),
             "label": labels.get(name),
             "attribution_window": window if name in CONVERSION_NAMES else None,
+            # J9.1 (1), (2): a lead is counted, never valued (D33), so a valued name with no
+            # quantity doesn't apply; an entry holding a quantity always does
+            "applies": not (
+                kind == "lead" and name in pipeline.VALUED and entry["quantity_id"] is None
+            ),
         }
 
     metric = pipeline.metric_quantity(s.metric)
