@@ -58,6 +58,7 @@ from tests.acceptance.j7_fixtures import (
     M,
     hours,
 )
+from tests.fakes.atmaos_base import BayesianResult
 from tests.acceptance.j9_fixtures import (
     BASE,
     CONVERSION_NAMES,
@@ -114,8 +115,8 @@ def result(env: J9Env, rid: str) -> dict[str, Any]:
 
 
 def qs(res: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
-    assert "quantities" in res, "result_of has no top-level 'quantities' (J9 (1))"
-    return res["quantities"]
+    assert "quantities" in res["uncertainty"], "result_of has no uncertainty.quantities (J9 (1), S47)"
+    return res["uncertainty"]["quantities"]
 
 
 def mixed_run(env: J9Env) -> str:
@@ -213,7 +214,12 @@ def test_J9_a_4_result_of_is_byte_for_byte_the_pre_J9_result_beside_quantities(
         before = env.pre_result(snap)
         now = env.result_of_snapshot(snap)
         assert before is not None
-        rest = {k: v for k, v in now.items() if k not in ("quantities", "quantities_unkeyed")}
+        rest = dict(now)
+        rest["uncertainty"] = {
+            k: v
+            for k, v in now["uncertainty"].items()
+            if k not in ("quantities", "quantities_unkeyed")
+        }  # S47: the new keys live under uncertainty
         assert json.dumps(rest) == json.dumps(before), rid
         assert C.canonical_json(rest["posterior"]) == C.canonical_json(before["posterior"]), rid
 
@@ -312,7 +318,7 @@ def test_J9_c_every_ad_quantity_appears_once_under_its_variant_and_name(env: J9E
             for name, e in by_name.items()
             if e["quantity_id"] is not None
         ]
-        seen += [("", e["metric"], e["quantity_id"]) for e in res.get("quantities_unkeyed", [])]
+        seen += [("", e["metric"], e["quantity_id"]) for e in res["uncertainty"].get("quantities_unkeyed", [])]
         ids = [x[2] for x in seen]
         assert len(ids) == len(set(ids)), rid
         present = set(d["variants"].values())
@@ -659,8 +665,8 @@ def test_J9_h_unkeyed_quantities_in_quantity_order(env: J9Env) -> None:
     ]
     assert [q["scope"]["ids"] for q in unkeyed] == [{"ad": foreign}, {"ad_set": "s1"}]
     res = result(env, rid)
-    assert "quantities_unkeyed" in res
-    got = res["quantities_unkeyed"]
+    assert "quantities_unkeyed" in res["uncertainty"]
+    got = res["uncertainty"]["quantities_unkeyed"]
     assert [e["quantity_id"] for e in got] == [q["quantity_id"] for q in unkeyed]
     for e, q in zip(got, unkeyed, strict=True):
         assert e["metric"] == q["name"]
@@ -679,8 +685,9 @@ def test_J9_h_no_unkeyed_quantity_means_no_key(env: J9Env) -> None:
     rid = env.run9(BASE, M)
     assert all("ad" in q["scope"]["ids"] for q in env.snap_json(rid)["quantities"])
     res = result(env, rid)
-    assert "quantities" in res
-    assert "quantities_unkeyed" not in res
+    assert "quantities" in res["uncertainty"]
+    assert "quantities_unkeyed" not in res["uncertainty"]
+    assert "quantities" not in res and "quantities_unkeyed" not in res  # S47
 
 
 # ------------------------------------------------------------------ (g) plain and stable
@@ -690,7 +697,7 @@ def test_J9_g_json_plain_and_the_same_twice(env: J9Env) -> None:
     for rid in _comparison_runs(env):
         a = result(env, rid)
         b = result(env, rid)
-        assert "quantities" in a
+        assert "quantities" in a["uncertainty"]
         assert is_json_plain(a), rid
         assert json.loads(json.dumps(a)) == a
         assert json.dumps(a) == json.dumps(b), rid
@@ -720,7 +727,7 @@ def test_J9_l_every_entry_s_fit_route_is_the_run_s(env: J9Env) -> None:
             assert res["posterior"][v]["fit_route"] == want
             for name, entry in by_name.items():
                 assert entry["fit_route"] == want, (rid, v, name)
-        for e in res.get("quantities_unkeyed", []):
+        for e in res["uncertainty"].get("quantities_unkeyed", []):
             assert e["fit_route"] == want
 
 
@@ -774,3 +781,15 @@ def test_J9_i_every_run_of_a_series_gives_quantities_with_ctr_and_cvr(env: J9Env
             assert q[v]["cpa"]["label"] == "cost per sign-up", (rid, v)
             assert q[v]["cvr"]["attribution_window"] == JO_WINDOW, (rid, v)
             assert without_j9(q[v]["ctr"]) == res["posterior"][v], (rid, v)
+
+
+# ------------------------------------------------------------------ S47 AtmaOS's result model
+
+
+def test_J9_S47_result_of_still_fits_AtmaOS_BayesianResult(env: J9Env) -> None:
+    """S47: the frozen ``BayesianResult`` forbids unknown top-level keys, so the new keys live
+    under ``uncertainty`` and every result still validates."""
+    for rid in _comparison_runs(env):
+        res = result(env, rid)
+        BayesianResult.model_validate(res)
+        assert "quantities" in res["uncertainty"]
