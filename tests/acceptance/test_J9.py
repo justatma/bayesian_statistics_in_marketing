@@ -816,3 +816,57 @@ def test_J9_S48_a_second_quantity_of_the_same_ad_and_name_goes_unkeyed(env: J9En
     assert got[0]["metric"] == "cvr"
     assert got[0]["summary"] == cvrs[1]["estimate"]["summary"]
     assert got[0]["unit"] == expected_unit("cvr", "lead", d["currency"])
+
+
+# ------------------------------------------------------------------ J9.1 applies
+
+
+def _quantity_ids(d: dict[str, Any]) -> set[tuple[str, str]]:
+    return {(q["scope"]["ids"].get("ad", ""), q["name"]) for q in d["quantities"]}
+
+
+def test_J9_1_a_on_a_lead_run_only_a_valued_name_with_no_quantity_does_not_apply(
+    env: J9Env,
+) -> None:
+    rid = env.run9(BASE, M)
+    d = env.snap_json(rid)
+    held = _quantity_ids(d)
+    seen_false = 0
+    for v, by_name in qs(result(env, rid)).items():
+        ad = d["variants"][v]
+        for name, e in by_name.items():
+            want = not (name in VALUED and (ad, name) not in held)
+            assert e["applies"] is want, (v, name)
+            seen_false += not want
+    assert seen_false > 0  # the fixture has D33 names to test
+
+
+def test_J9_1_b_a_lead_run_holding_a_valued_quantity_applies(env: J9Env) -> None:
+    rid = env.run9(BASE, M, add=[{"ad": IMG3_ID, "name": "contribution_per_click"}])
+    e = qs(result(env, rid))[LABELS[IMG3_ID]]["contribution_per_click"]
+    assert e["quantity_id"] is not None
+    assert e["applies"] is True
+
+
+def test_J9_1_c_every_entry_applies_on_a_purchase_run(env: J9Env) -> None:
+    def no_aov(d: dict[str, Any]) -> None:
+        gone = {q["quantity_id"] for q in d["quantities"] if q["name"] == "aov"}
+        d["quantities"] = [q for q in d["quantities"] if q["quantity_id"] not in gone]
+        for v in d["variants"]:
+            d["not_estimable"].setdefault(v, {})["aov"] = "no order values in the data"
+
+    rid = env.run9(BASE, E, kind="purchase", also=no_aov)
+    q = qs(result(env, rid))
+    assert any(by["aov"]["quantity_id"] is None for by in q.values())
+    assert all(e["applies"] is True for by in q.values() for e in by.values())
+
+
+def test_J9_1_d_unkeyed_entries_apply(env: J9Env) -> None:
+    rid = env.run9(BASE, M, adset=True, add=[{"ad": "999000111", "name": "contribution_per_click"}])
+    got = result(env, rid)["uncertainty"]["quantities_unkeyed"]
+    assert got and all(e["applies"] is True for e in got)
+
+
+def test_J9_1_e_posterior_gains_no_applies(env: J9Env) -> None:
+    rid = env.run9(BASE, M)
+    assert all("applies" not in e for e in result(env, rid)["posterior"].values())
