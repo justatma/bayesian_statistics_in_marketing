@@ -7,7 +7,7 @@ them give every slot kind, must produce it exactly, apart from ``checked_at`` an
 ``engine_version``. No client data: the repo is public.
 
 The file changes only with the join spec's version, and the change is announced to the Head
-Engineer. To rewrite it on purpose: ``BAYES_WRITE_CONTRACT=1 pytest tests/acceptance/test_contract_client_slots.py``.
+Engineer. To rewrite it on purpose, run this file with ``BAYES_WRITE_CONTRACT=1``.
 """
 
 from __future__ import annotations
