@@ -56,7 +56,7 @@ CONVERSION_NAMES = frozenset({"cvr", "cpa", "aov", "roas", "contribution_per_cli
 """S45 (5): exactly the names that carry an attribution window."""
 
 VALUED = ("aov", "roas", "contribution_per_click")
-J9_KEYS = frozenset({"unit", "label", "attribution_window"})
+J9_KEYS = frozenset({"unit", "label", "attribution_window", "applies"})  # applies: J9.1
 """J9 (4): what a ``quantities`` entry adds to the posterior entry of the same name."""
 
 FUTURE_NAME = "a_future_measure"

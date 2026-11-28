@@ -543,6 +543,7 @@ The Head Engineer's caller leaves aov, roas and contribution_per_click out of a 
 1. Each entry in `uncertainty.quantities` gains `applies` (bool). It is false exactly when the kind (S45 (1)) is "lead", the name is in `pipeline.VALUED` (aov, roas, contribution_per_click), and the run holds no quantity of that name for the variant's ad. Every other entry has `applies` true, so a below-floor quantity that could be estimated later has `applies` true.
 2. Each entry in `quantities_unkeyed` gets `applies` true, since every one holds a quantity.
 3. `posterior` is unchanged and gains no field.
+4. J9 (4)'s equality of `quantities[v][metric]` with `posterior[v]` now leaves out `applies` too. `tests/acceptance/j9_fixtures.py` `J9_KEYS` gains "applies" on the record, which was missed in 84a51a1.
 
 Checks: (a) on a lead run, every VALUED name with no quantity has `applies` false, and every other name true; (b) a lead run holding a contribution_per_click quantity gives it `applies` true; (c) on a purchase run every entry has `applies` true, a not-estimable aov included; (d) unkeyed entries have `applies` true; (e) `posterior` has no `applies`.
 
