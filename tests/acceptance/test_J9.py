@@ -58,7 +58,6 @@ from tests.acceptance.j7_fixtures import (
     M,
     hours,
 )
-from tests.fakes.atmaos_base import BayesianResult
 from tests.acceptance.j9_fixtures import (
     BASE,
     CONVERSION_NAMES,
@@ -79,6 +78,7 @@ from tests.acceptance.j9_fixtures import (
     variant_of,
     without_j9,
 )
+from tests.fakes.atmaos_base import BayesianResult
 
 pytestmark = pytest.mark.piece("J9")
 
@@ -115,7 +115,7 @@ def result(env: J9Env, rid: str) -> dict[str, Any]:
 
 
 def qs(res: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
-    assert "quantities" in res["uncertainty"], "result_of has no uncertainty.quantities (J9 (1), S47)"
+    assert "quantities" in res["uncertainty"], "no uncertainty.quantities (J9 (1), S47)"
     return res["uncertainty"]["quantities"]
 
 
@@ -318,7 +318,8 @@ def test_J9_c_every_ad_quantity_appears_once_under_its_variant_and_name(env: J9E
             for name, e in by_name.items()
             if e["quantity_id"] is not None
         ]
-        seen += [("", e["metric"], e["quantity_id"]) for e in res["uncertainty"].get("quantities_unkeyed", [])]
+        unkeyed = res["uncertainty"].get("quantities_unkeyed", [])
+        seen += [("", e["metric"], e["quantity_id"]) for e in unkeyed]
         ids = [x[2] for x in seen]
         assert len(ids) == len(set(ids)), rid
         present = set(d["variants"].values())
@@ -793,3 +794,25 @@ def test_J9_S47_result_of_still_fits_AtmaOS_BayesianResult(env: J9Env) -> None:
         res = result(env, rid)
         BayesianResult.model_validate(res)
         assert "quantities" in res["uncertainty"]
+
+
+# ------------------------------------------------------------------ S48 a duplicate quantity
+
+
+def test_J9_S48_a_second_quantity_of_the_same_ad_and_name_goes_unkeyed(env: J9Env) -> None:
+    """S48 (D54): the first quantity of an (ad, name) in ``s.quantities`` order is the keyed
+    entry, as ``posterior`` already picks; every later one goes to ``quantities_unkeyed`` in
+    quantity order, so none is left out."""
+    rid = env.run9(BASE, M, add=[{"ad": IMG3_ID, "name": "cvr", "keep_not_estimable": True}])
+    d = env.snap_json(rid)
+    cvrs = [
+        q for q in d["quantities"] if q["name"] == "cvr" and q["scope"]["ids"].get("ad") == IMG3_ID
+    ]
+    assert len(cvrs) == 2
+    res = result(env, rid)
+    assert qs(res)[LABELS[IMG3_ID]]["cvr"]["quantity_id"] == cvrs[0]["quantity_id"]
+    got = res["uncertainty"]["quantities_unkeyed"]
+    assert [e["quantity_id"] for e in got] == [cvrs[1]["quantity_id"]]
+    assert got[0]["metric"] == "cvr"
+    assert got[0]["summary"] == cvrs[1]["estimate"]["summary"]
+    assert got[0]["unit"] == expected_unit("cvr", "lead", d["currency"])
