@@ -1,0 +1,842 @@
+{
+ "request": {
+  "form": null,
+  "headers": {
+   "Authorization": "REDACTED"
+  },
+  "json": {
+   "currencyCode": "USD",
+   "dateRanges": [
+    {
+     "endDate": "2023-01-08",
+     "startDate": "2023-01-02"
+    }
+   ],
+   "dimensions": [
+    {
+     "name": "date"
+    },
+    {
+     "name": "sessionSource"
+    },
+    {
+     "name": "sessionMedium"
+    },
+    {
+     "name": "sessionCampaignName"
+    }
+   ],
+   "keepEmptyRows": false,
+   "limit": "10000",
+   "metrics": [
+    {
+     "name": "sessions"
+    },
+    {
+     "name": "ecommercePurchases"
+    },
+    {
+     "name": "purchaseRevenue"
+    }
+   ],
+   "offset": "0",
+   "returnPropertyQuota": true
+  },
+  "method": "POST",
+  "url": "https://analyticsdata.googleapis.com/v1beta/properties/342974352:runReport"
+ },
+ "response": {
+  "body": {
+   "dimensionHeaders": [
+    {
+     "name": "date"
+    },
+    {
+     "name": "sessionSource"
+    },
+    {
+     "name": "sessionMedium"
+    },
+    {
+     "name": "sessionCampaignName"
+    }
+   ],
+   "kind": "analyticsData#runReport",
+   "metadata": {
+    "currencyCode": "USD",
+    "dataTruncationReasons": [
+     {
+      "dataTruncationDate": "2023-11-03",
+      "dataTruncationMessage": "Data in this report is complete only after 2023-11-03. [Learn more](https://support.google.com/google-ads/answer/15188209)",
+      "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS"
+     },
+     {
+      "dataTruncationDate": "2023-11-03",
+      "dataTruncationMessage": "Data in this report is complete only after 2023-11-03. [Learn more](https://support.google.com/google-ads/answer/15188209)",
+      "dataTruncationType": "DATA_TRUNCATION_TYPE_GOOGLE_ADS"
+     }
+    ],
+    "schemaRestrictionResponse": {},
+    "timeZone": "America/New_York"
+   },
+   "metricHeaders": [
+    {
+     "name": "sessions",
+     "type": "TYPE_INTEGER"
+    },
+    {
+     "name": "ecommercePurchases",
+     "type": "TYPE_INTEGER"
+    },
+    {
+     "name": "purchaseRevenue",
+     "type": "TYPE_CURRENCY"
+    }
+   ],
+   "propertyQuota": {
+    "concurrentRequests": {
+     "consumed": 0,
+     "remaining": 10
+    },
+    "potentiallyThresholdedRequestsPerHour": {
+     "consumed": 0,
+     "remaining": 120
+    },
+    "serverErrorsPerProjectPerHour": {
+     "consumed": 0,
+     "remaining": 10
+    },
+    "tokensPerDay": {
+     "consumed": 2,
+     "remaining": 199595
+    },
+    "tokensPerHour": {
+     "consumed": 2,
+     "remaining": 39595
+    },
+    "tokensPerProjectPerHour": {
+     "consumed": 2,
+     "remaining": 13855
+    }
+   },
+   "rowCount": 26,
+   "rows": [
+    {
+     "dimensionValues": [
+      {
+       "value": "20230103"
+      },
+      {
+       "value": "(direct)"
+      },
+      {
+       "value": "(none)"
+      },
+      {
+       "value": "(direct)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "5"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230103"
+      },
+      {
+       "value": "l.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "5"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230104"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "5"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230106"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "5"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230104"
+      },
+      {
+       "value": "m.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "4"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "(direct)"
+      },
+      {
+       "value": "(none)"
+      },
+      {
+       "value": "(direct)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "4"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "l.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "4"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230105"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "3"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230107"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "3"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "3"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230105"
+      },
+      {
+       "value": "facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230105"
+      },
+      {
+       "value": "m.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230106"
+      },
+      {
+       "value": "l.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230106"
+      },
+      {
+       "value": "m.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230107"
+      },
+      {
+       "value": "facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "google"
+      },
+      {
+       "value": "organic"
+      },
+      {
+       "value": "(organic)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "instagram.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "2"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230103"
+      },
+      {
+       "value": "lm.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230103"
+      },
+      {
+       "value": "m.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230104"
+      },
+      {
+       "value": "(direct)"
+      },
+      {
+       "value": "(none)"
+      },
+      {
+       "value": "(direct)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230105"
+      },
+      {
+       "value": "google"
+      },
+      {
+       "value": "organic"
+      },
+      {
+       "value": "(organic)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230106"
+      },
+      {
+       "value": "google"
+      },
+      {
+       "value": "organic"
+      },
+      {
+       "value": "(organic)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230107"
+      },
+      {
+       "value": "(direct)"
+      },
+      {
+       "value": "(none)"
+      },
+      {
+       "value": "(direct)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230107"
+      },
+      {
+       "value": "l.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "dimensionValues": [
+      {
+       "value": "20230108"
+      },
+      {
+       "value": "m.facebook.com"
+      },
+      {
+       "value": "referral"
+      },
+      {
+       "value": "(referral)"
+      }
+     ],
+     "metricValues": [
+      {
+       "value": "1"
+      },
+      {
+       "value": "0"
+      },
+      {
+       "value": "0"
+      }
+     ]
+    }
+   ]
+  },
+  "headers": {
+   "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+   "content-encoding": "gzip",
+   "content-type": "application/json; charset=UTF-8",
+   "date": "Tue, 03 Nov 2026 12:57:49 GMT",
+   "server": "ESF",
+   "transfer-encoding": "chunked",
+   "vary": "Origin, X-Origin, Referer",
+   "x-content-type-options": "nosniff",
+   "x-frame-options": "SAMEORIGIN",
+   "x-xss-protection": "0"
+  },
+  "status": 200
+ }
+}

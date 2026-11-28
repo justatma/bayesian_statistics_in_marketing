@@ -1,0 +1,19 @@
+# Jovannah (client). No secrets here: the token lives in the keys file as META_ACCESS_TOKEN.
+client_id: jovannah
+# AtmaOS's id for this client (J4R.1): Imani's runtime names her client by it.
+atmaos_client_id: 01a1a97d-bce7-7000-8462-dc1e8af439a0
+timezone: America/New_York
+currency: USD
+economics_path: economics/jovannah.json
+accounts:
+  meta: act_1065479012990281
+# Live view §3.2 (D44): the pixel's Lead event, as her account returned it on 2026-11-07.
+# Confirmed 2026-11-10 (D47) against her Klaviyo export: the counts track hour by hour.
+conversion_event:
+  meta: offsite_conversion.fb_pixel_lead
+conversion_event_confirmed:
+  meta: true
+# J4R.2 (8): the main ad set's Meta name holds "$" and fails the display-name rule, so the ads
+# it shares names with are named by this alias. Keys are quoted: an unquoted id loads as a number.
+display_names:
+  "120253899504550526": "the main ad set"

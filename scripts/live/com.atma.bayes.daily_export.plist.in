@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily full-history export for Arkwright (D54). install_export.sh fills @REPO@ and installs
+     this in ~/Library/LaunchAgents. No credential appears here: daily_export.sh loads the keys
+     file at run time. Runs at 06:00 local, before Arkwright's intake at 06:15. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atma.bayes.daily_export</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>@REPO@/scripts/live/daily_export.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>@REPO@</string>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>@REPO@/data/live/logs/export.log</string>
+  <key>StandardErrorPath</key><string>@REPO@/data/live/logs/export.log</string>
+</dict>
+</plist>

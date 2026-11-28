@@ -1,0 +1,7 @@
+# Decision defaults (§8, §14). No default loss tolerance exists (D16).
+version: v1
+horizon_default: {unit: clicks, amount: 1000}
+objective_default: contribution
+quadrature_abs_tol: 1.0e-10   # §8.1 C2
+joint_draws: 20000
+learning_phase_switching_cost: {meta: null, google_ads: null, linkedin: null}  # unknown, disclosed (D13)

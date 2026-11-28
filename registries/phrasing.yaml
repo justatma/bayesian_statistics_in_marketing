@@ -1,0 +1,148 @@
+# Plain-word labels, caveats and rounding (§10, §12).
+version: v1
+evidence_plain:
+  delivery: "what the ad platform counted as delivered"
+  platform_attributed: "what the ad platform credited to the ads"
+  commercially_realized: "orders actually received"
+  causally_incremental: "measured against a holdout group"
+  deterministic: "arithmetic on the inputs"
+route_plain:
+  conjugate: "exact per-ad model"
+  nuts: "joint funnel model"
+  deterministic: "direct calculation"
+caveat_marginal: "this estimate is still rough"
+caveat_marginal_aliases: ["still rough", "a rough estimate", "still an estimate"]  # J4 (S7); check_narrative reads only caveat_marginal
+not_knowable: "not knowable yet"
+not_knowable_block: >-
+  Not knowable yet: {quantity}. We have {available}; we need about {required}. Getting there costs
+  about {cost}.
+watermark:
+  demo: "DEMO: built from simulated data, not a client result"
+  internal: "INTERNAL: not for client distribution"
+rounding:
+  percent_decimals: 1
+  money_decimals: 0
+  unit_money_decimals: 2  # live view: CPC and cost per conversion (build log B8)
+  probability_decimals: 2
+causal_lexicon:  # D29, D31: stems match every inflection; a hit counts only when an option is its subject or object in the clause
+  plain: [cause, drive, drove, generate, lift, boost, increase, raise, produce, improve, impact, trigger,
+          yield, help, create, "brought in", "bring in", "led to", "lead to", "leads to", "resulted in",
+          "result in", "results in", "because of", "due to", "thanks to", "responsible for",
+          "contributed to", "contribute to", "effect on", "driver of", "reason for", "pushed up",
+          "made .* go up", "pushed .* up", "gets us", "got us", "brings in"]
+  incremental: [incremental, incrementality]
+  negation_frames: ["did not find that", "do not find that", "no evidence that", "nothing shows that",
+                    "does not show that", "do not show that", "cannot say that", "cannot say whether",
+                    "we cannot tell whether", "it is not known whether"]  # D31: only these negate a claim
+comparative_lexicon:  # D29, D31: counts only when an option is the subject; direction from the clause's subject
+  comparative: [better, worse, higher, lower, stronger, weaker, more, fewer, less, cheaper,
+                "more expensive", outperform, underperform, beat, "ahead of", ahead, behind, trail,
+                "superior to", superior, "inferior to", inferior, "wins against", win, won, lead,
+                leading, "loses to", lose, lost, outrank, dominate, tops, "edges out", "edge over",
+                favorite, favourite, "the pick", preferable]  # last row: J4 review, 26 Nov
+  superlative: [best, worst, highest, lowest, strongest, weakest, cheapest, winner, loser,
+                "top performer", "bottom performer", "top ad", "top campaign", leader, "the leader",
+                first, last, "on top", "number one", "came out ahead"]
+  generic_phrases: ["more data", "more time", "more clicks", "more conversions", "more evidence",
+                    "at best", "at worst", "the better", "lower bound", "upper bound", "more reliable",
+                    "less certain", "more certain", "first day", "last day", "first week", "last week"]  # D31: never comparatives
+notices:
+  too_few_ads: "funnel link not estimated: too few ads"
+  lag_assumed: "conversion lag assumed"
+  lag_approx: "lag-adjusted approximation"
+  platform_modeled: "platform-modeled conversions"
+  joint_failed: "joint model failed checks"
+  waiting_late: "waiting for late conversions"
+status_labels:  # live view §5 L3 C5 (D43); keys added, version unchanged (build log B3)
+  below_floor: "below floor"
+  marginal: "marginal"
+  estimable: "estimable"
+live:  # live view §5 L3; the templates read these, never hard-code them
+  title: "Live view: {client_id}"
+  h_account: "Account"
+  h_delivery: "Delivery"
+  h_conversions: "Conversions"
+  h_budget: "Information budget (counts against floors, not estimates)"
+  h_engine: "Engine"
+  period_today: "today"
+  period_yesterday: "yesterday"
+  period_7d: "last 7 days"
+  banner_error: "The latest poll failed at {at} UTC: {error}"
+  banner_stale: "No good poll since {at} UTC ({hours} hours)."
+  banner_interrupted: "The poll started at {at} UTC has no outcome: poll interrupted."
+  no_poll: "No poll yet."
+  no_limit: "no limit set"
+  objective_missing: "objective not read"
+  none_yet: "none yet"
+  not_reported: "not reported"
+  purchases: "purchases"
+  event_not_seen: "The event {event} was not seen in this pull."
+  provisional: "(provisional)"
+  lead_sentence: "The engine counts leads and does not put a value on them (D33), so this page shows no revenue and no return on spend."
+  not_shown: "Not shown: revenue the business booked, and what the ads caused. Neither is measured yet."
+  platform_count: "platform count"
+  no_engine: "No engine run yet."
+  engine_skipped: "Engine skipped: {reason}."
+  engine_failed: "Engine run failed: {reason}."
+  no_diagnostics: "conjugate fit, no sampler diagnostics"
+  priors_title: "Priors"
+  no_prior_score: "No prior score yet."
+  prior_score_stale: "Scored before the latest poll."
+  prior_score_note: "Log score treats ads as independent under a fixed prior: exact for the per-ad model, approximate for the joint model."
+  prior_score_unreadable: "Latest prior score could not be read: {reason}."
+  tail_low: "data below what the prior expected"
+  tail_high: "data above what the prior expected"
+live_columns:  # live view table and header labels (build log B13); view.py maps field keys to these
+  campaign: "Campaign"
+  ad_set: "Ad set"
+  ad: "Ad"
+  objective: "Objective"
+  impressions: "Impressions"
+  clicks: "Link clicks"
+  spend: "Spend"
+  ctr: "CTR"
+  cvr: "Conversions per link click"
+  cpc: "CPC"
+  conversions_reported: "Count"
+  cost_per_conversion: "Cost each"
+  attribution_window: "Attribution"
+  count: "So far"
+  event_floor: "Floors"
+  status: "Status"
+  platform: "Platform"
+  account: "Account"
+  timezone: "Time zone"
+  currency: "Currency"
+  last_good_poll: "Last good poll"
+  next_expected: "Next expected"
+  amount_spent: "Spent to date"
+  spend_cap: "Spending limit"
+  account_status: "Account status"
+  client_id: "Client"
+  entity: "Ad"
+  label: "Quantity"
+  estimate: "Estimate"
+  low: "Low"
+  high: "High"
+  status_label: "Status"
+  evidence: "Evidence"
+  route: "Method"
+  rhat_max: "R-hat, highest"
+  ess_bulk_min: "Effective draws (bulk), lowest"
+  ess_tail_min: "Effective draws (tail), lowest"
+  n_divergences: "Divergent transitions"
+  role: "Prior"
+  prior: "Mean and 90% range"
+  ads_surprised: "Ads surprised"
+  log_score_vs_in_force: "Log score against the prior in force"
+  trials: "Trials"
+  successes: "Successes"
+  raw_rate: "Observed rate"
+  prior_range: "Prior 90% range"
+  tail: "Tail"
+  prior_weight: "Prior weight"
+  shrinkage: "Shrinkage"
+  scored_at: "Scored at"
+  in_force: "In force"
+  framework_lead: "Framework lead default"
+  framework_purchase: "Framework purchase default"

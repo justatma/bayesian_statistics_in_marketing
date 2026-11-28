@@ -1,0 +1,8 @@
+Ad performance report
+"November 1, 2026 - November 2, 2026"
+Day,Customer ID,Account,Campaign ID,Campaign,Ad group ID,Ad group,Ad ID,Ad,Impr.,Clicks,Cost,Currency code,Conversions,Conv. value
+2026-11-01,1234567890,North Pier,c1,Launch,ag1,Broad,ad_a,Ad A,1000,20,25.00,USD,3.50,280.00
+2026-11-01,1234567890,North Pier,c1,Launch,ag1,Broad,ad_b,Ad B,1000,17,21.25,USD,6.00,480.00
+2026-11-02,1234567890,North Pier,c1,Launch,ag1,Broad,ad_a,Ad A,1000,20,25.00,USD,4.00,320.00
+2026-11-02,1234567890,North Pier,c1,Launch,ag1,Broad,ad_b,Ad B,1000,17,21.25,USD,12.00,960.00
+Total: Account,,,,,,,,,4000,74,92.50,USD,25.50,2040.00

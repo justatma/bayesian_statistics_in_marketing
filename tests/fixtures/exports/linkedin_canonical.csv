@@ -1,0 +1,5 @@
+Start Date (in UTC),Account ID,Account Name,Campaign Group ID,Campaign Group Name,Campaign ID,Campaign Name,Creative ID,Ad Name,Impressions,Clicks,Total Spent,Currency,Conversions,Total Conversion Value
+2026-11-01,acc1,North Pier,c1,Launch,as1,Broad,ad_a,Ad A,1000,20,25.00,USD,4,320.00
+2026-11-01,acc1,North Pier,c1,Launch,as1,Broad,ad_b,Ad B,1000,17,21.25,USD,6,480.00
+2026-11-02,acc1,North Pier,c1,Launch,as1,Broad,ad_a,Ad A,1000,20,25.00,USD,4,320.00
+2026-11-02,acc1,North Pier,c1,Launch,as1,Broad,ad_b,Ad B,1000,17,21.25,USD,12,960.00

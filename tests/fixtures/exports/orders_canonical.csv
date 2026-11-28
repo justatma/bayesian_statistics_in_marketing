@@ -1,0 +1,4 @@
+order_id,ordered_at,value,currency,refunded,utm_source,utm_medium,utm_campaign,utm_content,click_id,first_click_at
+o1,2026-11-01T10:00:00-05:00,80.00,USD,0.00,facebook,paid,np_a,ad_a,,2026-10-30T09:00:00-05:00
+o2,2026-11-02T12:30:00-05:00,95.50,USD,10.00,facebook,paid,np_b,ad_b,fbclid123,
+o3,2026-11-02T23:30:00-05:00,64.00,USD,0.00,,,,,gclid456,2026-11-02T20:00:00-05:00

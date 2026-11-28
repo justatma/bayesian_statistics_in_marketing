@@ -1,0 +1,50 @@
+# B is truly a little better than the incumbent A, but over a 1,000-click horizon the gain
+# (0.003 x 1,000 x $32 = $96) is below a $250 switching cost, so the right action is hold
+# (§8.2 C2; §9.2 "Hold"). The channel registry carries no switching cost (D13), so a test that
+# exercises the hold sets learning_phase_switching_cost to the value in notes.
+scenario: switching_cost_hold
+description: Reallocation returns hold
+client_id: hold_co
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 14
+platforms:
+  meta: {utm_source: facebook, utm_medium: paid}
+lag: {median_days: 0}
+order_value: {dist: fixed, amount: "80.00"}
+economics:
+  variable_cost_per_order: "48.00"
+  price_source: fixed
+  fixed_price: "80.00"
+  loss_tolerance: "50.00"
+  source: synthetic scenario switching_cost_hold
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+ads:
+  - variant: A
+    platform: meta
+    account: {id: hold_acc1, name: Hold Co}
+    campaign: {id: hold_c1, name: Core}
+    ad_set: {id: hold_as1, name: Broad}
+    ad: {id: hold_a, name: Ad A}
+    utm_campaign: hold_a
+    truth: {ctr: 0.02, cvr: 0.040, cpc: 1.25}
+    phases:
+      - {days: 14, spend_per_day: "100.00"}
+  - variant: B
+    platform: meta
+    account: {id: hold_acc1, name: Hold Co}
+    campaign: {id: hold_c1, name: Core}
+    ad_set: {id: hold_as1, name: Broad}
+    ad: {id: hold_b, name: Ad B}
+    utm_campaign: hold_b
+    truth: {ctr: 0.02, cvr: 0.043, cpc: 1.25}
+    phases:
+      - {days: 14, spend_per_day: "100.00"}
+notes:
+  incumbent: A
+  switching_cost: {amount: "250", currency: USD}
+  horizon: {unit: clicks, amount: 1000}
+  true_benefit_of_switch: 96.0
+  true_action: hold

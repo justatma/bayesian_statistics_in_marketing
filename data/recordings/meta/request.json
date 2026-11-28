@@ -1,0 +1,18 @@
+{
+ "config": {
+  "client_id": "jovannah",
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "accounts": {
+   "meta": "act_1065479012990281"
+  },
+  "economics_path": "economics/jovannah.json",
+  "conversion_event": {},
+  "conversion_event_confirmed": {},
+  "priors": {}
+ },
+ "window": [
+  "2026-11-01",
+  "2026-11-07"
+ ]
+}

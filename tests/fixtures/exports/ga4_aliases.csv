@@ -1,0 +1,6 @@
+# Traffic acquisition: Session campaign
+date,session source,SESSION MEDIUM,Session campaign,sessions,Ecommerce purchases,purchase revenue
+2026-11-01,facebook,paid,np_a,120,3,240.00
+2026-11-01,facebook,paid,np_b,100,5,400.00
+2026-11-02,facebook,paid,np_a,110,2,160.00
+2026-11-02,facebook,paid,np_b,95,9,720.00

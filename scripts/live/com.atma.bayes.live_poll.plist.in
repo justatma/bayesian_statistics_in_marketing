@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Live view poll (spec/Live_View_Specification_v0.2.md §5 L0). install.sh fills @REPO@ and
+     @INTERVAL@ (registries/live.yaml interval_seconds) and installs this in ~/Library/LaunchAgents.
+     No credential appears here: run_with_keys.sh loads the keys file at run time. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atma.bayes.live_poll</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>@REPO@/scripts/live/run_with_keys.sh</string>
+    <string>live</string><string>poll</string><string>--all</string><string>--record</string>
+  </array>
+  <key>WorkingDirectory</key><string>@REPO@</string>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>@INTERVAL@</integer>
+  <key>StandardOutPath</key><string>@REPO@/data/live/logs/poll.log</string>
+  <key>StandardErrorPath</key><string>@REPO@/data/live/logs/poll.log</string>
+</dict>
+</plist>

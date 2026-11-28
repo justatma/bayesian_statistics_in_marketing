@@ -1,0 +1,25 @@
+# Guarantee prose (§8.5, I8). One template per guarantee kind. Slots in {braces}.
+# Every template states the route, the evidence class in plain words, the horizon and the main
+# assumption. No provisional entry exists here (D15).
+version: v1
+templates:
+  posterior_probability:
+    kind: posterior_probability
+    text: >-
+      Given the data so far ({evidence_plain}, {route_plain}), there is a {probability} chance that
+      {option} is the best of the options over the next {horizon}. This assumes {assumption}.
+  expected_loss:
+    kind: expected_loss
+    text: >-
+      If we choose {option} and it turns out not to be best, the expected cost over the next
+      {horizon} is {expected_loss}, against a tolerance of {tolerance} ({evidence_plain},
+      {route_plain}). This assumes {assumption}.
+  value_of_information:
+    kind: value_of_information
+    text: >-
+      Running {design} is worth about {evsi} in better decisions and costs about {cost}
+      ({evidence_plain}, {route_plain}), over the next {horizon}. This assumes {assumption}.
+  none:
+    kind: none
+    text: >-
+      We cannot make a recommendation yet: {reason}. Over the next {horizon}, {requirement}.

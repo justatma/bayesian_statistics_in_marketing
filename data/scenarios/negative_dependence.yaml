@@ -1,0 +1,37 @@
+# 12 ads whose latent (logit CTR, logit CVR) are bivariate normal with correlation -0.6 (§9.1).
+# The joint model should recover the sign; pairing CTR and CVR independently misstates ROAS.
+scenario: negative_dependence
+description: 12 ads, true CTR/CVR correlation -0.6
+client_id: negdep_co
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 14
+platforms:
+  meta: {utm_source: facebook, utm_medium: paid}
+lag: {median_days: 1}
+order_value: {dist: lognormal, median: 70.0, sigma: 0.6, ad_log_sd: 0.1}
+economics:
+  variable_cost_per_order: "40.00"
+  price_source: modeled_aov
+  loss_tolerance: "100.00"
+  source: synthetic scenario negative_dependence
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+population:
+  platform: meta
+  accounts: 1
+  campaigns_per_account: 1
+  ads_per_campaign: 12
+  ctr_median: 0.02
+  cvr_median: 0.03
+  logit_sd: {account: [0.0, 0.0], campaign: [0.0, 0.0], ad: [0.5, 0.5]}
+  ad_rho: -0.6
+  cpm_median: 10.0
+  cpm_log_sd: 0.15
+  spend_per_day: "100.00"
+  id_prefix: nd_
+  names: {account: "NegDep {i}", campaign: "Campaign {i}.{j}", ad_set: "Ad set {i}.{j}",
+          ad: "Ad {i}.{j}.{k}"}
+notes:
+  true_ad_rho: -0.6

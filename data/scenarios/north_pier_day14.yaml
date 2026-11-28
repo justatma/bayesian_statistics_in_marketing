@@ -1,0 +1,44 @@
+# North Pier, day fourteen (spec v0.3 §9.2 "CVR day fourteen", money rows). Clicks 400 / 340,
+# conversions 8 / 18 and spend $500 each reproduce exactly for any seed; impressions are drawn
+# given the clicks and the true CTR. All conversions are observed (no lag), so the orders file
+# holds 26 rows.
+scenario: north_pier_day14
+description: Manuscript totals, two ads, conjugate route
+client_id: north_pier
+currency: USD
+utc_offset: "-05:00"
+start_date: 2026-10-01
+n_days: 14
+platforms:
+  meta: {utm_source: facebook, utm_medium: paid}
+lag: {median_days: 0}
+order_value: {dist: fixed, amount: "80.00"}
+economics:
+  variable_cost_per_order: "48.00"
+  price_source: fixed
+  fixed_price: "80.00"
+  loss_tolerance: "50.00"                     # scenario choice; not in the Manuscript
+  source: synthetic scenario north_pier_day14
+  approved_by: scenario file (synthetic)
+  approved_at: "2026-11-03T00:00:00+00:00"
+ads:
+  - variant: A
+    platform: meta
+    account: {id: np_acc1, name: North Pier}
+    campaign: {id: np_c1, name: Launch}
+    ad_set: {id: np_as1, name: Broad}
+    ad: {id: ad_a, name: Ad A}
+    utm_campaign: np_a
+    truth: {ctr: 0.02, cvr: 0.02, cpc: 1.25}
+    phases:
+      - {days: 14, spend: "500.00", clicks: 400, conversions: 8}
+  - variant: B
+    platform: meta
+    account: {id: np_acc1, name: North Pier}
+    campaign: {id: np_c1, name: Launch}
+    ad_set: {id: np_as1, name: Broad}
+    ad: {id: ad_b, name: Ad B}
+    utm_campaign: np_b
+    truth: {ctr: 0.017, cvr: 0.052941176470588235, cpc: 1.4705882352941178}
+    phases:
+      - {days: 14, spend: "500.00", clicks: 340, conversions: 18}
