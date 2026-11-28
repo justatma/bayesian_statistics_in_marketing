@@ -14,14 +14,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from bayesian_marketing.claims import _refs as R
 from bayesian_marketing.claims import check as G5
 from bayesian_marketing.claims import vocab as V
 from bayesian_marketing.core import inputs_hash, utcnow
 
-SlotKind = Literal["fig", "cmp", "name", "date"]
+SlotKind = Literal["fig", "cmp", "name", "date", "na"]
 Form = Literal["full", "start"]
 
 
@@ -42,6 +42,8 @@ class MenuItem(TypedDict):
     run_id: str | None
     release_id: str | None
     forms: dict[str, str]  # "full" and "start", rendered
+    applies: NotRequired[bool]  # J9.2 (4), S49 (5): on an na item only, and always False
+    reason: NotRequired[str]  # J9.2 (4), S49 (5): on an na item only, from NA_REASONS
 
 
 class Menu(TypedDict):
@@ -218,6 +220,17 @@ R_LEVEL = "the subject's level does not match its name source"
 R_UNIT = "unit not renderable"
 #: S25 (8).
 R_KIND_UNKNOWN = "the account's conversion kind cannot be read, so the label cannot be chosen"
+#: S49 (6): an na slot with a claim, and an na slot for a measure that applies on the run.
+R_NA_CLAIM = "an na slot carries no claim"
+R_NA_APPLIES = "the measure applies to this account on that run"
+#: S49 (1): an na slot for a name outside ``pipeline.VALUED``.
+R_NA_NAME = "not a measure that can fail to apply"
+#: J9.2 (4), S49 (7): the plain reason a valued measure doesn't apply to a sign-up account.
+NA_REASONS: dict[str, str] = {
+    "roas": "a sign-up is given no money value",
+    "contribution_per_click": "a sign-up is given no money value",
+    "aov": "there are no orders",
+}
 
 #: S25 (4): the words the list gains. English first, then the numbers zero to twenty, hundred and
 #: thousand in Spanish, French, German, Italian and Portuguese, less "due", "seize", "elf", "un",
@@ -551,6 +564,8 @@ _FIG_RE = re.compile(
 )
 _CMP_RE = re.compile(rf"cmp:run/(?P<run>{_ID}){_TAIL}")
 _NAME_RE = re.compile(rf"name:ad/(?P<eid>{_ID})(?:\|(?P<form>full|start))?")
+#: J9.2 (1), S49 (6): the claim is parsed only to be refused by name.
+_NA_RE = re.compile(rf"na:run/(?P<run>{_ID})/(?P<name>{_ID}){_TAIL}")
 _DATE_RE = re.compile(r"date:(?P<iso>.*)", re.DOTALL)
 _ISO_RE = re.compile(
     r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?"
@@ -606,6 +621,14 @@ def _parse_slot(token: str, start: int, end: int) -> _Slot:
     elif m := _NAME_RE.fullmatch(body):
         s.kind, s.form, s.entity_id = "name", m["form"] or "full", m["eid"]
         s.ref = f"ad/{s.entity_id}"
+    elif m := _NA_RE.fullmatch(body):
+        s.kind, s.claim_id, s.form = "na", m["claim"], m["form"] or "full"
+        s.run_id, s.quantity_name = m["run"], m["name"]
+        s.ref = f"run/{s.run_id}/{s.quantity_name}"
+        if s.claim_id is not None:
+            s.reasons.append(f"{R_NA_CLAIM}: {token}")
+        elif s.quantity_name not in _valued():
+            s.reasons.append(f"{R_NA_NAME}: {s.quantity_name}")
     elif m := _DATE_RE.fullmatch(body):
         s.kind, s.ref = "date", m["iso"]
         if not _strict_iso(m["iso"]):
@@ -613,6 +636,12 @@ def _parse_slot(token: str, start: int, end: int) -> _Slot:
     else:
         s.reasons.append(f"{R_BAD_SLOT}: {token}")
     return s
+
+
+def _valued() -> tuple[str, ...]:
+    from bayesian_marketing import pipeline
+
+    return pipeline.VALUED
 
 
 # --- the engine items behind the slots -------------------------------------------------------
@@ -1244,6 +1273,28 @@ def _nb_quantity(s: _Slot, ctx: _Ctx) -> tuple[_Release, dict[str, Any], dict[st
     return rel, entry, q
 
 
+def _na_holds(run: _Run, name: str) -> bool:
+    """S49 (1), (2): the run's kind is lead, it has a variant, and no variant's ad holds a
+    quantity of ``name``, read from the snapshot through ``claims.applies``."""
+    from bayesian_marketing.claims.applies import applies
+
+    ads = list(run.snap.variants.values())
+    return (
+        run.kind == "lead"
+        and bool(ads)
+        and not any(applies(run.snap, run.kind, ad, name) for ad in ads)
+    )
+
+
+def _na(run: _Run, run_id: str, name: str) -> _Out:
+    """J9.2 (2), S49 (4), (5): the J5 label for the run's kind alone, with no "as of"."""
+    if not _na_holds(run, name):
+        raise _Fail(f"{R_NA_APPLIES}: {name} on run {run_id}")
+    label = V.labels(run.kind)[0].get(name, name.replace("_", " "))
+    quantity: SlotQuantity = {"name": name, "subject": "account", "status": None}
+    return _Out({"full": label, "start": _start(label, False)}, quantity, run.newest, run_id=run_id)
+
+
 def _render_slot(s: _Slot, ctx: _Ctx, names: _Names) -> _Out:
     if s.kind == "name":
         assert s.entity_id is not None
@@ -1256,6 +1307,9 @@ def _render_slot(s: _Slot, ctx: _Ctx, names: _Names) -> _Out:
         if isinstance(run, str):
             raise _Fail(run)
         _check_client(str(run.snap.client_id), ctx.client_id, f"run {s.run_id}")
+        if s.kind == "na":  # S49 (3): never reads held status
+            assert s.quantity_name is not None
+            return _na(run, s.run_id, s.quantity_name)
         if s.kind == "fig" and s.quantity_id in {
             r.recommendation_id for r in run.snap.recommendations
         }:  # J7 (9), S39 (13): no recommendation, allocation or share is a slot
@@ -1587,6 +1641,28 @@ def client_slots(
                 "forms": dict(out.forms),
             }
         )
+    if isinstance(run, _Run) and run.snap.client_id == client_id:
+        for name in _valued():  # S49 (11): after fig and cmp, before name, in VALUED order
+            try:
+                out = _na(run, str(run_id), name)
+            except _Fail:
+                continue
+            items.append(
+                {
+                    "token": f"{{na:run/{run_id}/{name}}}",
+                    "kind": "na",
+                    "measure": name,
+                    "subject": None,
+                    "status": None,
+                    "status_raw": None,
+                    "applies": False,
+                    "reason": NA_REASONS[name],
+                    "newest": bool(out.newest),
+                    "run_id": run_id,
+                    "release_id": None,
+                    "forms": dict(out.forms),
+                }
+            )
     for eid in ads:
         try:
             shown = _display_name(eid, "ad", names)

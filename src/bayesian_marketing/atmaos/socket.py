@@ -340,21 +340,20 @@ def _quantities(
     later one of an (ad, name), in quantity order (S48 (1))."""
     from bayesian_marketing.claims import held as H
     from bayesian_marketing.claims import vocab
+    from bayesian_marketing.claims.applies import applies
 
     kind = H.run_kind(s.conversion_kind, s.synthetic, s.client_id)
     labels = vocab.METRIC_LABELS_LEAD if kind == "lead" else vocab.METRIC_LABELS
     window = _attribution_window(s)
 
-    def measure(entry: dict[str, Any], name: str) -> dict[str, Any]:
+    def measure(entry: dict[str, Any], ad: str | None, name: str) -> dict[str, Any]:
         return entry | {
             "unit": _unit(name, kind, s.currency),
             "label": labels.get(name),
             "attribution_window": window if name in CONVERSION_NAMES else None,
-            # J9.1 (1), (2): a lead is counted, never valued (D33), so a valued name with no
-            # quantity doesn't apply; an entry holding a quantity always does
-            "applies": not (
-                kind == "lead" and name in pipeline.VALUED and entry["quantity_id"] is None
-            ),
+            # J9.1 (1), (2), S49 (2): a lead is counted, never valued (D33), so a valued name
+            # with no quantity for the ad doesn't apply; an entry holding a quantity always does
+            "applies": applies(s, kind, ad, name),
         }
 
     metric = pipeline.metric_quantity(s.metric)
@@ -369,7 +368,7 @@ def _quantities(
             if entry["quantity_id"] is not None and name in ne:
                 # S45 (3), S46 (3): the quantity wins; its reason goes in notices only
                 entry["notices"] = [*entry["notices"], ne[name]]
-            by_name[name] = measure(entry, name)
+            by_name[name] = measure(entry, ad, name)
         keyed[v] = by_name
     ads = set(s.variants.values())
     unkeyed: list[dict[str, Any]] = []
@@ -383,7 +382,7 @@ def _quantities(
             continue
         # S46 (1): no variant, so no not_estimable line; held as _held_fields gives for the ad
         h = held if ad is not None else (None, "held status not available: no ad in its scope")
-        unkeyed.append(measure(_entry(s, ad, q.name, q, "not estimable", h), q.name))
+        unkeyed.append(measure(_entry(s, ad, q.name, q, "not estimable", h), ad, q.name))
     return keyed, unkeyed
 
 
