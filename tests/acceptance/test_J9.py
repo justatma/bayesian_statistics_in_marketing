@@ -58,7 +58,6 @@ from tests.acceptance.j7_fixtures import (
     M,
     hours,
 )
-from tests.fakes.atmaos_base import BayesianResult
 from tests.acceptance.j9_fixtures import (
     BASE,
     CONVERSION_NAMES,
@@ -79,6 +78,7 @@ from tests.acceptance.j9_fixtures import (
     variant_of,
     without_j9,
 )
+from tests.fakes.atmaos_base import BayesianResult
 
 pytestmark = pytest.mark.piece("J9")
 
@@ -115,7 +115,7 @@ def result(env: J9Env, rid: str) -> dict[str, Any]:
 
 
 def qs(res: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
-    assert "quantities" in res["uncertainty"], "result_of has no uncertainty.quantities (J9 (1), S47)"
+    assert "quantities" in res["uncertainty"], "no uncertainty.quantities (J9 (1), S47)"
     return res["uncertainty"]["quantities"]
 
 
@@ -318,7 +318,8 @@ def test_J9_c_every_ad_quantity_appears_once_under_its_variant_and_name(env: J9E
             for name, e in by_name.items()
             if e["quantity_id"] is not None
         ]
-        seen += [("", e["metric"], e["quantity_id"]) for e in res["uncertainty"].get("quantities_unkeyed", [])]
+        unkeyed = res["uncertainty"].get("quantities_unkeyed", [])
+        seen += [("", e["metric"], e["quantity_id"]) for e in unkeyed]
         ids = [x[2] for x in seen]
         assert len(ids) == len(set(ids)), rid
         present = set(d["variants"].values())
