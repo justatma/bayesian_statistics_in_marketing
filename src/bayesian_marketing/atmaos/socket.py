@@ -336,7 +336,8 @@ def _quantities(
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     """J9 (1) to (3), (6), (8) to (11), S45, S46: every measure of every variant, keyed by
     variant and name, each entry the ``_posterior_entry`` for its name plus ``unit``, ``label``
-    and ``attribution_window``; and the quantities no variant can key, in quantity order."""
+    and ``attribution_window``; and the quantities no variant can key, or a later one of an (ad,
+    name), in quantity order (S48 (1))."""
     from bayesian_marketing.claims import held as H
     from bayesian_marketing.claims import vocab
 
@@ -367,9 +368,13 @@ def _quantities(
         keyed[v] = by_name
     ads = set(s.variants.values())
     unkeyed: list[dict[str, Any]] = []
+    first: set[tuple[str, str]] = set()
     for q in s.quantities:
         ad = q.scope.ids.get("ad")
-        if ad is not None and ad in ads:
+        if ad is not None and ad in ads and (ad, q.name) not in first:
+            # the keyed entry, the first of its (ad, name) as posterior picks; a later one is
+            # unkeyed so none is left out (S48 (1))
+            first.add((ad, q.name))
             continue
         # S46 (1): no variant, so no not_estimable line; held as _held_fields gives for the ad
         h = held if ad is not None else (None, "held status not available: no ad in its scope")
