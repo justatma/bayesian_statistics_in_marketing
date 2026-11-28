@@ -52,11 +52,21 @@ def second(d):
     if p1 is None or p1 <= 0 or p1 >= 1:
         out["answerable"] = "below_floor"
         return out
-    n1 = _N(p1, d["smallest_effect"], d["direction"], sh, c, d["false_positive_rate"], d["sensitivity"])
+    n1 = _N(
+        p1, d["smallest_effect"], d["direction"], sh, c, d["false_positive_rate"], d["sensitivity"]
+    )
     if n1 is None:
         out["answerable"] = "below_floor"
         return out
-    n2 = _N(p1, d["smallest_effect"] * ratio, d["direction"], sh, c, d["false_positive_rate"], d["sensitivity"])
+    n2 = _N(
+        p1,
+        d["smallest_effect"] * ratio,
+        d["direction"],
+        sh,
+        c,
+        d["false_positive_rate"],
+        d["sensitivity"],
+    )
     out["units_needed"], out["units_needed_marginal"] = n1, n2
     av = d["units_available"]
     if not d["randomized"]:
@@ -82,7 +92,15 @@ def second(d):
             keep = [c] + others[: m - 1]
             tot = sum(sh[a] for a in keep)
             ks = {a: sh[a] / tot for a in keep}
-            nk = _N(p1, d["smallest_effect"], d["direction"], ks, c, d["false_positive_rate"], d["sensitivity"])
+            nk = _N(
+                p1,
+                d["smallest_effect"],
+                d["direction"],
+                ks,
+                c,
+                d["false_positive_rate"],
+                d["sensitivity"],
+            )
             if nk is not None and av >= nk:
                 out["remedy"], out["remedy_amount"], done = "coarser_comparison", m, True
                 break
@@ -118,13 +136,17 @@ def _rand_design(rng):
     ctrl = rng.choice(arms)
     dirn = rng.choice(["more", "fewer"])
     return design(
-        arms=arms, control=ctrl, allocation=dict(zip(arms, sh)),
+        arms=arms,
+        control=ctrl,
+        allocation=dict(zip(arms, sh)),
         units_available=rng.choice([0, 50, 180, 850, 1900, 5000, 20000, 10**6]),
         units_per_period=rng.choice([None, 0, 10, 100, 2500]),
         direction=dirn,
         horizon_days=rng.choice([0, 7, 14, 60]),
         baseline_rate=rng.choice([None, 0, 1, 0.9, 0.5, 0.3, 0.1, 0.03, rng.random()]),
-        smallest_effect=rng.choice([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 1.5, rng.random() * 1.2 + 0.01]),
+        smallest_effect=rng.choice(
+            [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 1.5, rng.random() * 1.2 + 0.01]
+        ),
         false_positive_rate=rng.choice([0.05, 0.1, 0.01]),
         sensitivity=rng.choice([0.8, 0.9, 0.95]),
         randomized=rng.random() < 0.85,
@@ -172,7 +194,9 @@ def test_boundaries_both_sides_for_many_designs():
         m = r["units_needed_marginal"]
         if m is not None and m < r["units_needed"]:
             assert R.read_test_design({**d, "units_available": m})["answerable"] == "marginal"
-            assert R.read_test_design({**d, "units_available": m - 1})["answerable"] == "below_floor"
+            assert (
+                R.read_test_design({**d, "units_available": m - 1})["answerable"] == "below_floor"
+            )
             n += 1
     assert n > 20
 
@@ -180,6 +204,7 @@ def test_boundaries_both_sides_for_many_designs():
 # ---------------------------------------------------------------------------------------- the hash
 def _c1(v):
     """From J6.S2 (1) alone, a third hand: normalise then dumps."""
+
     def norm(x):
         if isinstance(x, bool) or x is None or isinstance(x, str):
             return x
@@ -188,7 +213,10 @@ def _c1(v):
         if isinstance(x, list):
             return [norm(y) for y in x]
         return {k: norm(y) for k, y in x.items()}
-    s = json.dumps(norm(v), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+    s = json.dumps(
+        norm(v), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
@@ -196,7 +224,20 @@ def test_hash_nested_whole_floats_bools_and_non_ascii():
     d = design(
         unit_kind="compte été \U0001f600",
         outcome={
-            "z": [1.0, True, 1, False, 0.0, -0.0, 1e0, 2.5, 1e-5, 1e16, 123456789012345678, [1.0, {"\U0001f600": 1.0, "￿": 2, "b": None}]],
+            "z": [
+                1.0,
+                True,
+                1,
+                False,
+                0.0,
+                -0.0,
+                1e0,
+                2.5,
+                1e-5,
+                1e16,
+                123456789012345678,
+                [1.0, {"\U0001f600": 1.0, "￿": 2, "b": None}],
+            ],
             "é": {"x": 3.0, "a": 0.1 + 0.2},
             "A": "́",
         },
@@ -230,17 +271,41 @@ def test_hash_key_order_and_int_float_in_counts():
 
 # ------------------------------------------------------------------------------------- refusals
 BAD = {
-    "arms": [None, 5, "x", [], ["usual_welcome"], ["a", "a"], ["usual_welcome", 3], ("usual_welcome", "plain_price")],
+    "arms": [
+        None,
+        5,
+        "x",
+        [],
+        ["usual_welcome"],
+        ["a", "a"],
+        ["usual_welcome", 3],
+        ("usual_welcome", "plain_price"),
+    ],
     "control": [None, 3, "nobody"],
-    "allocation": [None, [], {"usual_welcome": 0.5}, {"usual_welcome": 0.5, "plain_price": 0.6},
-                   {"usual_welcome": 1.0, "plain_price": 0.0}, {"usual_welcome": 1.5, "plain_price": -0.5},
-                   {"usual_welcome": "0.5", "plain_price": 0.5}, {"usual_welcome": True, "plain_price": 0.0},
-                   {"usual_welcome": float("nan"), "plain_price": 0.5},
-                   {"usual_welcome": 0.5, "plain_price": 0.5, "extra": 0.1}],
+    "allocation": [
+        None,
+        [],
+        {"usual_welcome": 0.5},
+        {"usual_welcome": 0.5, "plain_price": 0.6},
+        {"usual_welcome": 1.0, "plain_price": 0.0},
+        {"usual_welcome": 1.5, "plain_price": -0.5},
+        {"usual_welcome": "0.5", "plain_price": 0.5},
+        {"usual_welcome": True, "plain_price": 0.0},
+        {"usual_welcome": float("nan"), "plain_price": 0.5},
+        {"usual_welcome": 0.5, "plain_price": 0.5, "extra": 0.1},
+    ],
     "unit_kind": [None, 3, True],
     "units_available": [None, -1, "5", True, 1.5, float("nan"), float("inf")],
     "units_per_period": ["5", -1, True, 2.5, float("inf")],
-    "outcome": [None, [], "x", {"a": float("nan")}, {"a": {"b": [float("inf")]}}, {"a": object()}, {1: 2}],
+    "outcome": [
+        None,
+        [],
+        "x",
+        {"a": float("nan")},
+        {"a": {"b": [float("inf")]}},
+        {"a": object()},
+        {1: 2},
+    ],
     "direction": [None, "More", "up", 1, ["more"]],
     "horizon_days": [None, -1, "7", True, 1.5],
     "baseline_rate": ["0.3", True, -0.01, 1.01, float("nan"), float("inf"), [0.3]],
@@ -298,25 +363,29 @@ def _reads(**over):
     return R.read_test_design(design(**over))
 
 
-def test_F1_large_unit_cost_is_a_reading_not_a_decimal_error():
-    """Finding 1 (minor): rule 13 / J6.S3 on a large but finite unit_cost. The default Decimal
-    context holds 28 digits, so quantize raises InvalidOperation at about 1e23 a unit."""
+def test_F1_large_unit_cost_is_refused_naming_the_field():
+    """Finding 1 (minor), settled by J6.S6: a unit cost above COUNT_MAX is refused, naming it,
+    so the Decimal product to cents can always be held."""
     for c in (1e25, 10**30):
-        assert _reads(unit_cost=c)["cost_of_test"] is not None
+        with pytest.raises(ValueError, match="unit_cost"):
+            _reads(unit_cost=c)
+    assert _reads(unit_cost=10**12)["cost_of_test"] is not None
 
 
-def test_F2_extreme_alpha_is_a_reading_not_an_overflow():
-    """Finding 2 (minor): alpha in (0, 1) but so small that alpha / (k - 1) underflows to 0, or
-    the z-score overflows, raises ValueError (unnamed field) or OverflowError."""
-    _reads(false_positive_rate=5e-324, **equal_arms(3))
-    _reads(false_positive_rate=5e-324)
+def test_F2_extreme_alpha_is_refused_naming_the_field():
+    """Finding 2 (minor), settled by J6.S6: alpha and power lie in [1e-9, 1 - 1e-9]."""
+    for k in (2, 3):
+        with pytest.raises(ValueError, match="false_positive_rate"):
+            _reads(false_positive_rate=5e-324, **equal_arms(k))
+    _reads(false_positive_rate=1e-9, **equal_arms(3))
 
 
-def test_F3_huge_counts_do_not_overflow():
-    """Finding 3 (minor): a count above the double range passes validation, then raises
-    OverflowError in float arithmetic (units_available 10**400)."""
-    _reads(units_available=10**400)
-    _reads(units_available=0, units_per_period=1, horizon_days=10**400)
+def test_F3_huge_counts_are_refused_naming_the_field():
+    """Finding 3 (minor), settled by J6.S6: a count above COUNT_MAX is refused, naming it."""
+    with pytest.raises(ValueError, match="units_available"):
+        _reads(units_available=10**400)
+    with pytest.raises(ValueError, match="horizon_days"):
+        _reads(units_available=0, units_per_period=1, horizon_days=10**400)
 
 
 def test_F4_lone_surrogate_is_refused_naming_a_field():
@@ -348,7 +417,7 @@ def test_value_per_outcome_any_string_accepted():
 
 
 def test_integer_unit_cost_equals_decimal_of_repr():
-    for c in (0, 1, 3, 10**15):
+    for c in (0, 1, 3, 10**12):  # J6.S6: COUNT_MAX
         a = R.read_test_design(design(unit_cost=c))["cost_of_test"]
         b = R.read_test_design(design(unit_cost=float(c)))["cost_of_test"]
         assert a == b
@@ -391,19 +460,34 @@ def test_not_mutated_and_no_state_between_calls():
 
 def test_reading_shape_and_closed_strings():
     rng = random.Random(5)
-    words = {"estimable", "marginal", "below_floor", "coarser_comparison", "longer_run", "larger_group", "fixed_horizon"}
+    words = {
+        "estimable",
+        "marginal",
+        "below_floor",
+        "coarser_comparison",
+        "longer_run",
+        "larger_group",
+        "fixed_horizon",
+    }
     for _ in range(300):
         d = _rand_design(rng)
         r = R.read_test_design(d)
         assert tuple(r) == R.READING_KEYS and json_native(r)
         json.dumps(r, allow_nan=False)
-        allowed = words | {d["unit_kind"], d["currency"]} | set(r["rule_ref"]) | {r["engine_version"], r["inputs_hash"]}
+        allowed = (
+            words
+            | {d["unit_kind"], d["currency"]}
+            | set(r["rule_ref"])
+            | {r["engine_version"], r["inputs_hash"]}
+        )
         for key, v in r.items():
             if isinstance(v, str):
                 assert v in allowed, (key, v)
         assert (r["remedy"] is None) == (r["remedy_amount"] is None)
         if r["units_needed"] is None:
-            assert r["periods_needed"] is None and r["stopping_rule"] is None and r["remedy"] is None
+            assert (
+                r["periods_needed"] is None and r["stopping_rule"] is None and r["remedy"] is None
+            )
 
 
 def test_reads_nothing_beyond_registries():
@@ -449,4 +533,6 @@ def test_rule_values_and_isolated_process():
         out = json.loads(p.stdout)
         assert out["rule"] == want
         assert out["read"] == R.read_test_design(d)
-        assert os.listdir(dd) == [] or all(not f.endswith((".db", ".sqlite")) for f in os.listdir(dd))
+        assert os.listdir(dd) == [] or all(
+            not f.endswith((".db", ".sqlite")) for f in os.listdir(dd)
+        )

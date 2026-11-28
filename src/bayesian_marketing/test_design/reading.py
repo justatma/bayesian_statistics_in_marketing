@@ -132,12 +132,28 @@ def _is_num(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+COUNT_MAX = 10**12
+"""J6.S6: the largest count or unit cost read; anything above is refused, naming the field."""
+RATE_EDGE = 1e-9
+"""J6.S6: alpha and power lie in [RATE_EDGE, 1 - RATE_EDGE]."""
+
+
+def _utf8(key: str, s: str) -> None:
+    """J6.S6: a string must encode as UTF-8 (no lone surrogate)."""
+    try:
+        s.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(f"{key}: not valid Unicode text") from None
+
+
 def _num(d: dict[str, Any], key: str, *, null: bool = False) -> Any:
     v = d[key]
     if v is None and null:
         return None
     if not _is_num(v):
         raise ValueError(f"{key}: a number is wanted, not {type(v).__name__}")
+    if isinstance(v, int) and abs(v) > COUNT_MAX:  # J6.S6: before any float conversion
+        raise ValueError(f"{key}: must be at most {COUNT_MAX} in size")
     if not math.isfinite(v):
         raise ValueError(f"{key}: NaN or infinity")
     return v
@@ -147,10 +163,14 @@ def _count(d: dict[str, Any], key: str, *, low: int = 0, null: bool = False) -> 
     v = d[key]
     if v is None and null:
         return None
+    if _is_num(v) and isinstance(v, int) and v > COUNT_MAX:  # J6.S6: before any float use
+        raise ValueError(f"{key}: must be at most {COUNT_MAX}")
     if not _is_num(v) or not math.isfinite(v) or v != int(v):
         raise ValueError(f"{key}: an integer is wanted")
     if v < low:
         raise ValueError(f"{key}: must be at least {low}")
+    if v > COUNT_MAX:
+        raise ValueError(f"{key}: must be at most {COUNT_MAX}")
     return int(v)
 
 
@@ -160,6 +180,7 @@ def _str(d: dict[str, Any], key: str, *, null: bool = False) -> str | None:
         return None
     if not isinstance(v, str):
         raise ValueError(f"{key}: a string is wanted")
+    _utf8(key, v)
     return v
 
 
@@ -172,7 +193,10 @@ def _bool(d: dict[str, Any], key: str) -> bool:
 
 def _json_native(key: str, v: Any) -> None:
     """Refuse NaN, infinity and non-JSON values at any depth (J6.S2 (1) (b))."""
-    if v is None or isinstance(v, (bool, int, str)):
+    if isinstance(v, str):
+        _utf8(key, v)
+        return
+    if v is None or isinstance(v, (bool, int)):
         return
     if isinstance(v, float):
         if not math.isfinite(v):
@@ -186,6 +210,7 @@ def _json_native(key: str, v: Any) -> None:
         for k, x in v.items():
             if not isinstance(k, str):
                 raise ValueError(f"{key}: object keys must be strings")
+            _utf8(key, k)
             _json_native(key, x)
         return
     raise ValueError(f"{key}: not a JSON value ({type(v).__name__})")
@@ -241,8 +266,8 @@ def _validate(design: Any) -> None:
     if _num(design, "smallest_effect") <= 0:
         raise ValueError("smallest_effect: must be above 0")
     for key in ("false_positive_rate", "sensitivity"):
-        if not 0 < _num(design, key) < 1:
-            raise ValueError(f"{key}: must lie in (0, 1)")
+        if not RATE_EDGE <= _num(design, key) <= 1 - RATE_EDGE:
+            raise ValueError(f"{key}: must lie in [{RATE_EDGE:g}, 1 - {RATE_EDGE:g}]")
     _bool(design, "randomized")
     _bool(design, "holdout")
     _str(design, "channel")
@@ -250,6 +275,8 @@ def _validate(design: Any) -> None:
     c = _num(design, "unit_cost", null=True)
     if c is not None and c < 0:
         raise ValueError("unit_cost: must be 0 or more")
+    if c is not None and c > COUNT_MAX:
+        raise ValueError(f"unit_cost: must be at most {COUNT_MAX}")
     _str(design, "currency", null=True)
     _count(design, "period_days", low=1)
     kc = design["kill_candidates"]
