@@ -566,3 +566,20 @@ If Jo asks Imani for her return on ad spend, the true answer is that a sign-up a
 6. AtmaOS's side (the Head Engineer, landing with J9.2): `na` in its slot pattern, menu instruction and slot audit; with an `na` item for a measure, no fig slot for that measure may appear in the turn; and a lint flags "not yet" or "too early" wording beside that measure's name.
 
 Checks: (a) a lead run gives three `na` items, each with its reason, and each token renders the label in both forms; (b) a purchase run gives none, and an `na` token for it is refused; (c) a `#claim` on an `na` token is refused; (d) a lead run holding a contribution_per_click quantity gives no `na` item for that name, and its token is refused; (e) the rendered text and the reasons pass the numeral rule; (f) an `na` token for a run that isn't the newest renders as a fig slot for such a run does; (g) the menu's other items are unchanged.
+
+## Settled after the J9.2 blind spec review (27 Nov)
+
+The review found 2 blocking items, 6 major and 4 minor. These settlements govern where J9.2 says otherwise.
+
+S49 (J9.2).
+1. An `na` token may name only a name in `pipeline.VALUED` (aov, roas, contribution_per_click). It renders only when the run's kind is "lead", the run has at least one variant, and no variant's ad holds a quantity of that name. That rule decides whether or not an entry exists for the name, so a lead run saved before D46 with no D33 lines gives the same answer. Any other name is refused as "not a measure that can fail to apply".
+2. The rule lives in one pure function, `claims.applies.applies(snap, kind, ad, name) -> bool`, in a new module that imports neither `slots` nor `socket`. J9.1's `applies` field in `result_of` and J9.2's renderer both call it, and the J9.2 builder moves J9.1's inline rule there without changing its output. The renderer reads the snapshot, never `result_of`.
+3. An `na` slot never reads held status: it skips `ctx.held`, so a held loader that raises or gives null doesn't stop it. A check covers that.
+4. No "as of" suffix, on the newest run or any other. The fact is account level and doesn't date. `newest` says whether the run is the newest, as for fig slots, and the forms are the label alone.
+5. Shapes. `SlotKind` gains "na". An `na` `SlotOut` has `quantity` `{"name": <name>, "subject": "account", "status": None}`, so AtmaOS's audit can match the measure. `MenuItem` gains `applies` and `reason` as NotRequired keys, present only on `na` items, so every other item is unchanged byte for byte (check (g)). The menu entry's `subject` is null as in J9.2 (4).
+6. The grammar parses an optional `#claim` so it can refuse it by name: `R_NA_CLAIM` = "an na slot carries no claim". A name that applies gives `R_NA_APPLIES` = "the measure applies to this account on that run". An unreadable run gives the fig slots' run reasons. The menu lists no `na` item when the newest run can't be read.
+7. The aov reason stays "there are no orders", the Principal Architect's words: an average order value needs orders, and a sign-up account has none. roas and contribution_per_click keep "a sign-up is given no money value".
+8. J9.2 (5) is reworded: slot output is outside the numeral rule, as for every slot. Check (e) asserts that the labels and reasons hold no numeral or quantity word the rule would refuse in free text, which tests the table.
+9. The engine's lint doesn't read `na` slots. The "not yet" and "too early" lint and the no-fig-slot-beside-na audit are AtmaOS's, J9.2 (6).
+10. The kind is `run.kind` in the renderer, which equals `held.run_kind`. A check covers a None-kind lead snapshot whose kind comes from the config.
+11. Order: `na` items come after the fig and cmp items and before the name items, in `pipeline.VALUED` order. The label is J5's for the kind, already lower case, and `_start` capitalises it.
