@@ -501,3 +501,31 @@ The Principal Architect's reading of the Head Engineer's backfill found that `re
 12. How cpa is made, for the caller's links. On the exact per-ad route (every run of Jo's so far), cpa has its own inverse-gamma posterior from the ad's spend and sign-up count. It shares the sign-up count with cvr, but it isn't computed from cvr. On the joint route, cpa is computed from the joint draws as cpm / (1000 · ctr · cvr), so there it does rest on cvr and ctr. The entry's `fit_route.kind` says which route a run took.
 
 Checks: (a) `posterior` is unchanged on pinned runs. (b) `quantities[v][metric]` equals `posterior[v]` without `unit`, `label` and `attribution_window`, on every fixture run. (c) Every ad quantity in the snapshot appears exactly once, under its variant and name, with its `quantity_id`. (d) Every `not_estimable` name appears with its reason and `quantity_id` null. (e) cvr and cpa entries carry the held status that `held.lookup` gives for that name, and `held_status_reason` when it gives none. (f) The units of (6), with cpa's currency equal to `s.currency`. (g) The output is JSON-plain, and two calls give identical output. (h) A run with an unkeyed quantity gives `quantities_unkeyed`, and a run without one has no such key. (i) On a copy of Jo's live runs, every run gives `quantities` without raising, with ctr and cvr for every ad. (j) Labels and attribution windows as in (9) and (10), on a lead run and a purchase run. (k) A below-floor quantity keeps its summary.
+
+## Settled after the J9 blind spec review (27 Nov)
+
+The review found 2 blocking items, 7 major and 5 minor. These settlements govern where J9 says otherwise.
+
+S45 (J9).
+1. One reader for the kind. Labels (9) and units (6) take the kind from `held.run_kind(s.conversion_kind, s.synthetic, s.client_id)`, the reader the held keys and the renderer's R9 already use. 432 of Jo's 455 runs state no kind, and `run_kind` gives "lead" for every one of them from her config. A check asserts that on a None-kind lead fixture.
+2. `not_estimable` is keyed by variant, as `pipeline.py` builds it (`missing.setdefault(variant, ...)`), and quantities are found by the variant's ad id. A fixture has variant labels that differ from the ad ids.
+3. A variant's names are the union in (2). If a name is both a quantity of that ad and in that variant's `not_estimable`, the quantity wins and the reason goes in the entry's `notices` after the quantity's own. No such pair exists in Jo's runs.
+4. `_posterior_entry` gains a keyword `name: str | None = None`, defaulting to the run's metric name, so `posterior` calls it unchanged. The `quantities` builder calls it with each name and then adds `unit`, `label` and `attribution_window`. Inside an entry, `metric` is the entry's own name, as `_posterior_entry` already writes it, so `quantities[v]["cvr"]["metric"]` is "cvr". A check asserts that.
+5. `attribution_window` is the last part of `s.knowability.attribution_windows[s.platform]` split on " then ". It is null when `knowability` is missing, the platform key is absent or the string is empty. The conversion-based names are exactly {cvr, cpa, aov, roas, contribution_per_click}. Every other name gets null. A check covers a two-code string.
+6. The unit table, literal strings, with K the kind from (1) ("lead" or "purchase") and C `s.currency`:
+
+| name | numerator | denominator | currency |
+|---|---|---|---|
+| ctr | link_click | impression | null |
+| cvr | K | link_click | null |
+| cpa | money | K | C |
+| aov | money | K | C |
+| roas | money | money | C |
+| contribution_per_click | money | link_click | C |
+| any other | the whole `unit` is null | | |
+
+7. The per-entry `synthetic` is what `_posterior_entry` gives now: the quantity's provenance when the quantity is present, else the snapshot's. Unchanged.
+8. Check (h) uses a hand-built snapshot with one quantity whose ad isn't among `variants` and one with no ad in its scope. "Quantity order" is the order in `s.quantities`.
+9. Check (i) asserts that `ctr` and `cvr` keys exist for every ad, whatever their status. Check (k) uses a fixture with a present below-floor cvr, whose entry keeps `summary`, and a not-estimable cpa, whose `summary` is null.
+10. Check (e) asserts that, when `held.lookup` gives None for a name, the entry's `held_status_reason` is "held status not available: no held status for <name> of ad <ad>", the text `_held_fields` writes now.
+11. Added check (l): every entry's `fit_route` equals the run's, so a reader can tell which route made cpa (12).
