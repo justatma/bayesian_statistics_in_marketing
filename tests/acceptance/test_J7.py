@@ -789,7 +789,7 @@ def test_J7_h_the_menu_lists_no_recommendation_allocation_or_share(env: J7Env) -
     menu = env.menu7(load_held=lambda r: env.raw_held_map(r))
     assert run_items(menu, rid)
     for item in menu["slots"]:
-        assert item["kind"] in ("fig", "cmp", "name"), item
+        assert item["kind"] in ("fig", "cmp", "name", "na"), item  # S52: J9.2's na kind
         assert not any(r in item["token"] for r in rec_ids), item
         for word in ("alloc", "share", "budget", "recommend"):
             assert word not in str(item["measure"] or "").lower(), item

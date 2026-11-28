@@ -211,8 +211,9 @@ def test_J4R_menu_shape(env: J4REnv, run: str, rel: str) -> None:
     json.dumps(menu)
     assert menu["slots"], menu
     for item in menu["slots"]:
-        assert set(item) >= set(S.MenuItem.__annotations__)
-        assert item["kind"] in ("fig", "cmp", "name", "date")
+        # S52: J9.2's applies and reason are NotRequired, present on na items only (S49 (5))
+        assert set(item) >= set(S.MenuItem.__annotations__) - {"applies", "reason"}
+        assert item["kind"] in ("fig", "cmp", "name", "date", "na")
         assert "#" not in item["token"]  # no claim id
         assert "|" not in item["token"]  # no form
         assert set(item["forms"]) >= {"full", "start"}
