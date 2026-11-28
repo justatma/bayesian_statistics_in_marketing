@@ -209,7 +209,7 @@ def _held_of(s: pipeline.RunSnapshot) -> tuple[dict | None, str | None]:
 
 def _held_fields(
     s: pipeline.RunSnapshot,
-    ad: str,
+    ad: str | None,
     name: str,
     raw: str,
     reasons: list[str],
@@ -238,14 +238,34 @@ def _held_fields(
 
 
 def _posterior_entry(
-    s: pipeline.RunSnapshot, variant: str, held: tuple[dict | None, str | None] = (None, None)
+    s: pipeline.RunSnapshot,
+    variant: str,
+    held: tuple[dict | None, str | None] = (None, None),
+    *,
+    name: str | None = None,
 ) -> dict[str, Any]:
+    """One variant's entry for ``name``, the run's metric name by default, so ``posterior`` is
+    as it was (J9 (3), S45 (4)). ``metric`` is the entry's own name."""
     ad = s.variants[variant]
-    name = pipeline.metric_quantity(s.metric)
+    name = pipeline.metric_quantity(s.metric) if name is None else name
     q = next(
         (x for x in s.quantities if x.name == name and x.scope.ids.get("ad") == ad),
         None,
     )
+    reason = s.not_estimable.get(variant, {}).get(name, "not estimable")
+    return _entry(s, ad, name, q, reason, held)
+
+
+def _entry(
+    s: pipeline.RunSnapshot,
+    ad: str | None,
+    name: str,
+    q: Any,
+    reason: str,
+    held: tuple[dict | None, str | None],
+) -> dict[str, Any]:
+    """The fields of one entry: the quantity ``q``'s estimate, or, with ``q`` None, status
+    ``below_floor`` with ``reason`` as the notice (J9 (3), (11))."""
     entry: dict[str, Any] = {
         "entity": {s.platform: ad},
         "metric": name,
@@ -253,7 +273,6 @@ def _posterior_entry(
         **_pointer(s),
     }
     if q is None:
-        reason = s.not_estimable.get(variant, {}).get(name, "not estimable")
         return entry | {
             "quantity_id": None,
             "status": "below_floor",
@@ -282,9 +301,92 @@ def _posterior_entry(
     }
 
 
+CONVERSION_NAMES = frozenset({"cvr", "cpa", "aov", "roas", "contribution_per_click"})
+"""J9 (10), S45 (5): exactly the names that carry an attribution window."""
+
+
+def _unit(name: str, kind: str, currency: str) -> dict[str, Any] | None:
+    """J9 (6), S45 (6): the unit table, with ``kind`` the run's conversion kind and ``currency``
+    ``s.currency``. A name the table doesn't list gets null."""
+    table: dict[str, tuple[str, str, str | None]] = {
+        "ctr": ("link_click", "impression", None),
+        "cvr": (kind, "link_click", None),
+        "cpa": ("money", kind, currency),
+        "aov": ("money", kind, currency),
+        "roas": ("money", "money", currency),
+        "contribution_per_click": ("money", "link_click", currency),
+    }
+    row = table.get(name)
+    if row is None:
+        return None
+    return {"numerator": row[0], "denominator": row[1], "currency": row[2]}
+
+
+def _attribution_window(s: pipeline.RunSnapshot) -> str | None:
+    """J9 (10), S45 (5): the code in force at the end of the data for the run's platform, the
+    last part of its ``attribution_windows`` string split on " then "; null when there is none."""
+    if s.knowability is None:
+        return None
+    code = s.knowability.attribution_windows.get(s.platform) or ""
+    return code.split(" then ")[-1] or None
+
+
+def _quantities(
+    s: pipeline.RunSnapshot, held: tuple[dict | None, str | None]
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """J9 (1) to (3), (6), (8) to (11), S45, S46: every measure of every variant, keyed by
+    variant and name, each entry the ``_posterior_entry`` for its name plus ``unit``, ``label``
+    and ``attribution_window``; and the quantities no variant can key, or a later one of an (ad,
+    name), in quantity order (S48 (1))."""
+    from bayesian_marketing.claims import held as H
+    from bayesian_marketing.claims import vocab
+
+    kind = H.run_kind(s.conversion_kind, s.synthetic, s.client_id)
+    labels = vocab.METRIC_LABELS_LEAD if kind == "lead" else vocab.METRIC_LABELS
+    window = _attribution_window(s)
+
+    def measure(entry: dict[str, Any], name: str) -> dict[str, Any]:
+        return entry | {
+            "unit": _unit(name, kind, s.currency),
+            "label": labels.get(name),
+            "attribution_window": window if name in CONVERSION_NAMES else None,
+        }
+
+    metric = pipeline.metric_quantity(s.metric)
+    keyed: dict[str, dict[str, Any]] = {}
+    for v in sorted(s.variants):
+        ad = s.variants[v]
+        ne = s.not_estimable.get(v, {})
+        names = {q.name for q in s.quantities if q.scope.ids.get("ad") == ad} | set(ne) | {metric}
+        by_name: dict[str, Any] = {}
+        for name in sorted(names):
+            entry = _posterior_entry(s, v, held, name=name)
+            if entry["quantity_id"] is not None and name in ne:
+                # S45 (3), S46 (3): the quantity wins; its reason goes in notices only
+                entry["notices"] = [*entry["notices"], ne[name]]
+            by_name[name] = measure(entry, name)
+        keyed[v] = by_name
+    ads = set(s.variants.values())
+    unkeyed: list[dict[str, Any]] = []
+    first: set[tuple[str, str]] = set()
+    for q in s.quantities:
+        ad = q.scope.ids.get("ad")
+        if ad is not None and ad in ads and (ad, q.name) not in first:
+            # the keyed entry, the first of its (ad, name) as posterior picks; a later one is
+            # unkeyed so none is left out (S48 (1))
+            first.add((ad, q.name))
+            continue
+        # S46 (1): no variant, so no not_estimable line; held as _held_fields gives for the ad
+        h = held if ad is not None else (None, "held status not available: no ad in its scope")
+        unkeyed.append(measure(_entry(s, ad, q.name, q, "not estimable", h), q.name))
+    return keyed, unkeyed
+
+
 def result_of(s: pipeline.RunSnapshot) -> dict:
     """§11.2 mapping from a run snapshot. Each posterior entry carries the raw ``status`` and,
-    beside it, the held one (J7, S39 (8), (9))."""
+    beside it, the held one (J7, S39 (8), (9)). ``uncertainty.quantities`` holds every measure of
+    every variant, and ``uncertainty.quantities_unkeyed`` any no variant can key, absent when
+    empty (J9, S45, S47)."""
     held = _held_of(s)
     ad_to_variant = {ad: v for v, ad in s.variants.items()}
     c = s.comparison
@@ -352,6 +454,11 @@ def result_of(s: pipeline.RunSnapshot) -> dict:
         "config_hash": s.config_hash,
         "tool_version": s.tool_version,
     }
+    # S47: under uncertainty, since BayesianResult forbids new top-level keys
+    keyed, unkeyed = _quantities(s, held)
+    uncertainty["quantities"] = keyed
+    if unkeyed:
+        uncertainty["quantities_unkeyed"] = unkeyed
     return _plain(out)
 
 
