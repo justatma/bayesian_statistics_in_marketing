@@ -545,3 +545,22 @@ The Head Engineer's caller leaves aov, roas and contribution_per_click out of a 
 3. `posterior` is unchanged and gains no field.
 
 Checks: (a) on a lead run, every VALUED name with no quantity has `applies` false, and every other name true; (b) a lead run holding a contribution_per_click quantity gives it `applies` true; (c) on a purchase run every entry has `applies` true, a not-estimable aov included; (d) unkeyed entries have `applies` true; (e) `posterior` has no `applies`.
+
+## J9.2. A measure that doesn't apply, on Imani's menu (to spec, after J9.1; words for the Principal Architect)
+
+If Jo asks Imani for her return on ad spend, the true answer is that a sign-up account has none to measure. The menu gives Imani nothing to say it with today, because `client_slots` builds fig slots only from the run's quantities, and a lead's aov, roas and contribution_per_click are never quantities.
+
+1. A new slot kind, `na`. Token: `{na:run/<run_id>/<name>}` with an optional `|full` or `|start`. Grammar: `na:run/(?P<run>[\w-]+)/(?P<name>[\w-]+)(?:\|(?P<form>full|start))?`. It takes no `#claim`, and a token carrying one is refused with a reason, because no claim exists for it.
+2. It renders only when every variant of that run has `applies` false for that name in `uncertainty.quantities` (J9.1). Otherwise it's refused with a reason. It is account level, never per ad.
+3. The menu lists one `na` item per such name on the newest run: `{"token", "kind": "na", "measure": <name>, "subject": null, "status": null, "status_raw": null, "newest": true, "run_id", "release_id": null, "forms": {"full", "start"}}`.
+4. The words hold no numeral, so the numeral rule passes the rendered text. They are Jo-facing, so the Principal Architect settles them before the build. Proposed:
+
+| name | start | full |
+|---|---|---|
+| roas | Return on ad spend doesn't apply to this account: it counts sign-ups and gives them no money value, so there's no return to measure | return on ad spend, which doesn't apply to this account because it counts sign-ups and gives them no money value |
+| aov | Average value per sign-up doesn't apply to this account: it counts sign-ups and gives them no money value, so there's no value to average | average value per sign-up, which doesn't apply to this account because it counts sign-ups and gives them no money value |
+| contribution_per_click | Contribution per click doesn't apply to this account: it counts sign-ups and gives them no money value, so a click earns nothing to set against its cost | contribution per click, which doesn't apply to this account because it counts sign-ups and gives them no money value |
+
+5. The Head Engineer adds `na` to AtmaOS's slot pattern, menu instruction and slot audit in one piece that lands with J9.2.
+
+Checks, to freeze with the words: (a) a lead run gives three `na` items and each renders in both forms; (b) a purchase run gives none, and an `na` token for it is refused; (c) a `#claim` on an `na` token is refused; (d) a lead run holding a contribution_per_click quantity gives no `na` item for that name; (e) the rendered text passes the numeral rule; (f) a stale run id renders as fig slots do for a run that isn't the newest.
