@@ -215,3 +215,13 @@ J6.S5 (the J6 test writer, 27 Nov, tests 2aa76b0).
 3. `rule_ref`'s second entry ends in the package version alone: `engine:test_design.reading.MAX_PERIODS@0.2.0.dev0`, which is `bayesian_marketing.__version__`. That's the form the Arkwright Engineer has pinned. `engine_version` keeps its "bayesian-marketing <version>" form, which has a space, as the other socket calls do.
 4. When `remedy` is null, `remedy_amount` is null.
 5. E2 is two equal arms, a 0.10 baseline, `more` at 0.2, on 180 units. E3 is two equal arms, a 0.40 baseline, `fewer` at 0.2, on 850 units. Both use alpha 0.05 and power 0.8 and come from AtmaOS's AS5 key. No flow is given for either, so both remedies are `larger_group` with the total `units_needed`. AtmaOS's key still carries the old shortfall amounts and is being regenerated (For AtmaOS).
+
+J6.S6 (the J6 blind review, 27 Nov, review/J6 7c13c95). Four inputs far outside any real design raised an error naming no field. They are now refused, each naming its field, at stated limits that AtmaOS's replay desk applies the same way:
+- Every count (`units_available`, `units_per_period`, `horizon_days`, `period_days`) and `unit_cost` must be at most `COUNT_MAX` = 10^12. An integer above it is refused before any conversion to float.
+- `false_positive_rate` and `sensitivity` must lie in [1e-9, 1 − 1e-9].
+- Every string, at any depth and object keys included, must encode as UTF-8.
+
+The reviewer's readings stand:
+- A whole float sent for a count (1900.0) is read as the integer, and the desk must do the same.
+- An effect too small to move p2 from p1 in doubles reads under rule 6: `below_floor`, with the sizes null.
+- An integer `unit_cost` goes into Decimal directly. That equals `Decimal(repr(...))` of the int.
