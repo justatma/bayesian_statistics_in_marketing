@@ -379,8 +379,9 @@ def _quantities(
 
 def result_of(s: pipeline.RunSnapshot) -> dict:
     """§11.2 mapping from a run snapshot. Each posterior entry carries the raw ``status`` and,
-    beside it, the held one (J7, S39 (8), (9)). ``quantities`` holds every measure of every
-    variant, and ``quantities_unkeyed`` any no variant can key, absent when empty (J9, S45)."""
+    beside it, the held one (J7, S39 (8), (9)). ``uncertainty.quantities`` holds every measure of
+    every variant, and ``uncertainty.quantities_unkeyed`` any no variant can key, absent when
+    empty (J9, S45, S47)."""
     held = _held_of(s)
     ad_to_variant = {ad: v for v, ad in s.variants.items()}
     c = s.comparison
@@ -448,10 +449,11 @@ def result_of(s: pipeline.RunSnapshot) -> dict:
         "config_hash": s.config_hash,
         "tool_version": s.tool_version,
     }
+    # S47: under uncertainty, since BayesianResult forbids new top-level keys
     keyed, unkeyed = _quantities(s, held)
-    out["quantities"] = keyed
+    uncertainty["quantities"] = keyed
     if unkeyed:
-        out["quantities_unkeyed"] = unkeyed
+        uncertainty["quantities_unkeyed"] = unkeyed
     return _plain(out)
 
 
