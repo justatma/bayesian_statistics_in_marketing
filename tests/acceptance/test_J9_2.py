@@ -71,11 +71,11 @@ NA_APPLIES_TEXT = "the measure applies to this account on that run"
 #: S49 (1), verbatim.
 NOT_A_MEASURE_TEXT = "not a measure that can fail to apply"
 
-#: J9.2 (4) and S49 (7): the plain reasons.
+#: J9.2 (4), S49 (7) and S54: the plain reasons.
 REASONS = {
-    "roas": "a sign-up is given no money value",
-    "contribution_per_click": "a sign-up is given no money value",
-    "aov": "there are no orders",
+    "roas": "a sign-up isn't given a money value",
+    "contribution_per_click": "a sign-up isn't given a money value",
+    "aov": "the account takes sign-ups, not orders",
 }
 #: J9.2 (2), S49 (11): J5's lead label (``METRIC_LABELS_LEAD``), and with a capital.
 FULL = {
@@ -788,3 +788,22 @@ def test_J9_2_3_variant_labels_that_differ_from_ad_ids_change_nothing(env: J9Env
     snap = env.snapshot9(rid)
     assert set(snap.variants) == set(LABELS.values())
     assert_na_renders(env, rid)
+
+
+# ------------------------------------------------------------------ S54 reasons in her words
+
+
+@pytest.mark.parametrize(
+    "shape", ["{tok} doesn't apply to this account, because {r}.", "{tok} doesn't apply here: {r}."]
+)
+def test_J9_2_S54_every_reason_written_after_its_token_passes(env: J9Env, shape: str) -> None:
+    """S54: Imani may write the menu's reason in her own sentence, so each reason, written
+    after its token in either shape, passes ``render_client_text`` (numeral rule and lint)."""
+    rid = env.run9(BASE, M)
+    items = {i["measure"]: i for i in menu(env)["slots"] if i["kind"] == "na"}
+    assert set(items) == set(REASONS)
+    for name, item in items.items():
+        tok = na(rid, name, "start")
+        res = render(env, shape.format(tok=tok, r=item["reason"]))
+        assert res["ok"] is True, (name, why(res))
+        assert res["text"].startswith(START[name])

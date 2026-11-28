@@ -227,9 +227,9 @@ R_NA_APPLIES = "the measure applies to this account on that run"
 R_NA_NAME = "not a measure that can fail to apply"
 #: J9.2 (4), S49 (7): the plain reason a valued measure doesn't apply to a sign-up account.
 NA_REASONS: dict[str, str] = {
-    "roas": "a sign-up is given no money value",
-    "contribution_per_click": "a sign-up is given no money value",
-    "aov": "there are no orders",
+    "roas": "a sign-up isn't given a money value",
+    "contribution_per_click": "a sign-up isn't given a money value",
+    "aov": "the account takes sign-ups, not orders",
 }
 
 #: S25 (4): the words the list gains. English first, then the numbers zero to twenty, hundred and
